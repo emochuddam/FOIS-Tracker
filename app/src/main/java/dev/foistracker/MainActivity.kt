@@ -21,13 +21,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.*
-import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
-import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -459,30 +457,14 @@ class MainActivity : FragmentActivity() {
     }
     internal fun paste(): String = getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
         ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-    internal fun export(freight: Freight, format: ReportFormat, share: Boolean, whatsApp: Boolean = false) {
+    internal fun export(freight: Freight, format: ReportFormat) {
         val id = freight.fnr.takeIf { it.matches(Regex("[0-9]{11}")) } ?: "Freight"
         val name = "FOIS-$id.${format.extension}"
-        if (!share) {
-            report = freight to format
-            saveReport.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).setType(format.mime)
-                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, name))
-        } else execute {
-            val dir = File(cacheDir, "reports").apply { mkdirs() }
-            val file = File(dir, name)
-            file.outputStream().use { Reports.write(format, freight, it) }
-            val uri = FileProvider.getUriForFile(this@MainActivity, "${packageName}.reports", file)
-            val outgoing = Intent(Intent.ACTION_SEND).setType(format.mime).putExtra(Intent.EXTRA_STREAM, uri)
-                .apply { clipData = ClipData.newUri(contentResolver, name, uri) }.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            withContext(Dispatchers.Main) {
-                if (whatsApp) {
-                    outgoing.setPackage("com.whatsapp")
-                    try { startActivity(outgoing); return@withContext }
-                    catch (_: android.content.ActivityNotFoundException) { outgoing.setPackage(null) }
-                }
-                startActivity(Intent.createChooser(outgoing, "Share freight report"))
-            }
-        }
+        report = freight to format
+        saveReport.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).setType(format.mime)
+            .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, name))
     }
+
     internal fun channelSettings(alert: Alert) {
         startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)

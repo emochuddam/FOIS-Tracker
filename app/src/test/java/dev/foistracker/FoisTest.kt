@@ -147,6 +147,29 @@ class FoisTest {
         assertEquals("RMN", result.get("Origin"))
     }
 
+    @Test fun routeInvoiceFallsBackToFirstReceiptAndReadsFoisFormattedFnr() = MockWebServer().use { server ->
+        server.enqueue(MockResponse().setBody("""
+            <table><tr><th>STTN FROM</th><th>STTN TO</th><th>LOAD TYPE</th><th>LDNG TIME</th><th>RMNG KM</th></tr>
+            <tr><td>RMN</td><td>CFS</td><td><a href='QryLoadInvcDtls.jsp?loadid=fixture'>BOX</a></td>
+            <td>24-11-2026 12:00</td><td>415</td></tr></table>
+        """))
+        server.enqueue(MockResponse().setBody("<p>Invoice without a receipt link</p>"))
+        server.enqueue(MockResponse().setBody("<p>No FNR in the POST response</p>"))
+        server.enqueue(MockResponse().setBody("""<span class="textBoldMR">01234 567890</span>"""))
+        val result = FoisClient(root = server.url("/")).enquiry(Query("RMN CFS")).single()
+        assertEquals("01234567890", result.fnr)
+        assertEquals("415", result.get("Remaining distance"))
+        server.takeRequest()
+        server.takeRequest()
+        val post = server.takeRequest().body.readUtf8()
+        assertTrue(post.contains("txtInvcNo=1"))
+        assertTrue(post.contains("txtDate=24-11-2026"))
+        val fallback = server.takeRequest()
+        assertEquals("GET", fallback.method)
+        assertEquals("rrdtls", fallback.requestUrl?.queryParameter("suboperation"))
+        assertEquals("fixture", fallback.requestUrl?.queryParameter("LoadID"))
+    }
+
     @Test fun publicStationLookupParsesOfficialDirectoryHeaders() = MockWebServer().use { server ->
         server.enqueue(MockResponse().setBody("<form></form>"))
         server.enqueue(MockResponse().setBody("""

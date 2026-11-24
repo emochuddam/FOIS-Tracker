@@ -34,9 +34,11 @@ class TrackerDeviceTest {
     @Test fun displaysFreightNumberAndOpensDetailsByDefault() {
         val fnr = "01234567890"
         compose.runOnIdle {
-            compose.activity.page = ResultPage(Query(fnr), listOf(Freight(mapOf("FNR" to fnr))), true)
+            compose.activity.page = ResultPage(Query(fnr),
+                listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415"))), true)
         }
         compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
+        compose.onNodeWithText("415 km").assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
         compose.onNodeWithText("Collapse").assertIsDisplayed()
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Recognize formatted FNRs on FOIS receipt pages and fall back to the first receipt when a link is absent.
+- Add neutral backgrounds, card shadows, smooth button presses, and a green live-refresh indicator.
+- Show remaining kilometers beneath the ETA and replace sharing actions with clipboard controls.
+
 ## 1.0.2
 
 - Simplified the app theme to standard Material 3 components and removed the Liquid Glass dependency.

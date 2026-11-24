@@ -12,12 +12,12 @@ Debug builds are signed for testing. Android requires the same signing certifica
 
 ## Freight enquiries
 
-The app uses a simple Material 3 theme that follows the device. While an authenticated result is open in the foreground, live refresh starts a new check one second after the last request finishes. Refresh and pause status appear inline. The result still shows the latest movement reported by FOIS. On Android 13 and later, the app requests permission for notifications. You can also enable them under **Settings → Notifications**.
+The app uses a neutral Material 3 theme with elevated cards that follows the device. While an authenticated result is open in the foreground, live refresh starts a new check one second after the last request finishes. Refresh and pause status appear inline. The result still shows the latest movement reported by FOIS. On Android 13 and later, the app requests permission for notifications. You can also enable them under **Settings → Notifications**.
 
 - Enter an 11-digit FNR on Home or Search. Guests enter the verification code shown by the official FOIS public enquiry form.
 - Enter station codes such as **RMN CFS** or select stations from the autocomplete list. Use **Find stations on FOIS** for a name or code outside the local list. Station-pair enquiries open ECBS sign-in and resume the query when login succeeds. The consignor filter defaults to **FCI**, as in the original script, and is editable.
 - Background refresh uses the current authorized ECBS session. Save an FNR and enable automatic tracking to schedule checks. The default is 15 minutes. Android may run checks later due to battery, network, or operating system scheduling. If ECBS ends the session, sign in again and complete verification to resume checks.
-- The retrieval time and source are shown on result screens. Saved and previous results can be opened offline. Text, CSV and PDF reports can be saved with Android's document picker or shared through the Android share sheet or WhatsApp.
+- The retrieval time and source are shown on result screens. Saved and previous results can be opened offline. Text, CSV and PDF reports can be saved with Android's document picker. Use **Copy report** to copy the full report to the clipboard.
 
 ## How FOIS access works
 

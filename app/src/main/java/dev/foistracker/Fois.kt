@@ -71,7 +71,8 @@ private val aliases = mapOf(
     "locn" to "Last reported station", "from" to "Origin", "to" to "Destination", "detail" to "Consignment detail",
     "status location" to "Last reported station", "stts time" to "Last reported movement",
     "stts code" to "Freight status", "status" to "Freight status", "ldng time" to "Loading date",
-    "rmng km" to "Remaining distance", "loco numb" to "Locomotive number", "loco type" to "Locomotive type",
+    "rmng km" to "Remaining distance", "remaining km" to "Remaining distance",
+    "remaining distance (km)" to "Remaining distance", "loco numb" to "Locomotive number", "loco type" to "Locomotive type",
     "totl unts" to "Wagon count", "no of wagons" to "Wagon count", "load type" to "Load type"
 ) + fields.associateBy { it.lowercase(Locale.ROOT) }
 
@@ -229,7 +230,10 @@ object FreightParser {
     fun reportedFnr(html: String): String? {
         if (expired(html)) throw FoisError.Authentication()
         val doc = Jsoup.parse(html)
-        return doc.select("tr").firstNotNullOfOrNull { row ->
+        val formatted = doc.select("span[class]").filter { it.className().contains("textboldmr", ignoreCase = true) }
+            .map { it.text().filter { character -> character in '0'..'9' } }
+            .filter { it.length == 11 }.distinct()
+        return formatted.singleOrNull() ?: doc.select("tr").firstNotNullOfOrNull { row ->
             val cells = cells(row)
             val index = cells.indexOfFirst { key(it.text()) == "FNR" }
             cells.getOrNull(index + 1)?.text()?.takeIf { index >= 0 && it.matches(Regex("[0-9]{11}")) }
@@ -439,10 +443,13 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
                 .addQueryParameter("sttnfrom", origin).addQueryParameter("sttnto", destination).build()
         }
         val html = request(url.toString(), referer = router).decodeToString()
-        val receipts = FreightParser.receipts(html)
-        if (receipts.isEmpty()) {
-            val number = FreightParser.reportedFnr(html) ?: return listOf(row.freight)
-            return listOf(row.freight.copy(values = row.freight.values + ("FNR" to number)))
+        val receipts = FreightParser.receipts(html).ifEmpty {
+            val number = FreightParser.reportedFnr(html)
+            if (number != null) return listOf(row.freight.copy(values = row.freight.values + ("FNR" to number)))
+            if (row.freight.fnr.isNotEmpty()) return listOf(row.freight)
+            val date = row.freight.values["Loading date"]
+                ?.let { Regex("""\b\d{2}-\d{2}-\d{4}\b""").find(it)?.value } ?: today()
+            listOf(FreightParser.Receipt(origin, destination, "1", date, null))
         }
         return receipts.map { receipt ->
             val args = mapOf("txtSttnFrom" to receipt.origin, "txtSttnTo" to receipt.destination,

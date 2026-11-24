@@ -1,6 +1,10 @@
 package dev.foistracker
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -43,16 +48,22 @@ import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
 
-private val pine = Color(0xFF005647)
-private val mint = Color(0xFF95F2C4)
-private val light = lightColorScheme(primary = pine, onPrimary = Color.White, primaryContainer = Color(0xFFA6F1D0),
-    onPrimaryContainer = Color(0xFF003328), background = Color(0xFFEBF4F0), onBackground = Color(0xFF112923),
-    surface = Color(0xFFF8FCFA), onSurface = Color(0xFF142A24), surfaceVariant = Color(0xFFDCEBE5),
-    onSurfaceVariant = Color(0xFF39554B), outline = Color(0xFF60786E), secondaryContainer = Color(0xFFD5E9E9))
-private val dark = darkColorScheme(primary = mint, onPrimary = Color(0xFF003829), primaryContainer = Color(0xFF174C3B),
-    onPrimaryContainer = Color(0xFFC3FFDD), background = Color(0xFF101E26), onBackground = Color(0xFFE5F5EF),
-    surface = Color(0xFF162931), onSurface = Color(0xFFE9F6F0), surfaceVariant = Color(0xFF20383F),
-    onSurfaceVariant = Color(0xFFB8CBCA), outline = Color(0xFF819C97), secondaryContainer = Color(0xFF25444B))
+private val light = lightColorScheme(
+    primary = Color(0xFF303030), onPrimary = Color.White, primaryContainer = Color(0xFFE9E9E9),
+    onPrimaryContainer = Color(0xFF202020), secondaryContainer = Color(0xFFE5E5E5),
+    onSecondaryContainer = Color(0xFF222222), background = Color(0xFFF5F5F5),
+    onBackground = Color(0xFF181818), surface = Color.White, onSurface = Color(0xFF181818),
+    surfaceVariant = Color(0xFFEAEAEA), onSurfaceVariant = Color(0xFF454545),
+    surfaceContainer = Color(0xFFF1F1F1), surfaceContainerHigh = Color(0xFFECECEC), outline = Color(0xFF686868)
+)
+private val dark = darkColorScheme(
+    primary = Color(0xFFE5E5E5), onPrimary = Color(0xFF202020), primaryContainer = Color(0xFF333333),
+    onPrimaryContainer = Color(0xFFEAEAEA), secondaryContainer = Color(0xFF363636),
+    onSecondaryContainer = Color(0xFFE8E8E8), background = Color(0xFF121212),
+    onBackground = Color(0xFFECECEC), surface = Color(0xFF1E1E1E), onSurface = Color(0xFFECECEC),
+    surfaceVariant = Color(0xFF343434), onSurfaceVariant = Color(0xFFD0D0D0),
+    surfaceContainer = Color(0xFF252525), surfaceContainerHigh = Color(0xFF2D2D2D), outline = Color(0xFFB0B0B0)
+)
 private val tabs = listOf("Home", "Search", "Tracking", "History", "Settings")
 private val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.LocationOn, Icons.AutoMirrored.Filled.List, Icons.Default.Settings)
 private val stations = listOf("RMN" to "Raman", "NDLS" to "New Delhi", "DLI" to "Delhi Junction",
@@ -166,7 +177,20 @@ private fun Brand(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ActionButton(label: String, enabled: Boolean = true, action: () -> Unit) {
-    Button(onClick = action, enabled = enabled) { Text(label) }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed && enabled) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f),
+        label = "Button press"
+    )
+    Button(
+        onClick = action,
+        enabled = enabled,
+        interactionSource = interaction,
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale },
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 1.dp)
+    ) { Text(label) }
 }
 
 @Composable
@@ -185,7 +209,11 @@ private fun Navigation(selected: Int, select: (Int) -> Unit) {
 
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier.fillMaxWidth()) {
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp)
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
     }
 }
@@ -664,6 +692,14 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                     Label(if (freight.arrived == null) "ESTIMATED ARRIVAL" else "CONFIRMED ARRIVAL")
                     Text(displayFreightTime(freight.arrived ?: freight.eta), fontSize = 40.sp,
                         lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Label("REMAINING DISTANCE")
+                    val distance = freight.values["Remaining distance"]
+                    val distanceText = when {
+                        distance == null -> "Not Reported"
+                        distance.any(Char::isLetter) -> distance
+                        else -> "$distance km"
+                    }
+                    Text(distanceText, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
                     if (freight.arrived != null && freight.eta != null) Text("Last ETA · ${displayFreightTime(freight.eta)}")
                     val previous = freightTime(freight.previousEta)
                     val current = freightTime(freight.eta)
@@ -693,8 +729,13 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         active -> "Live refresh paused"
                         else -> "Showing last reported data"
                     }
-                    Text(liveStatus, color = if (polling) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.labelLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (polling || app.automaticRefresh) {
+                            val green = if (isSystemInDarkTheme()) Color(0xFF63E68A) else Color(0xFF198344)
+                            Box(Modifier.size(10.dp).background(green, CircleShape))
+                        }
+                        Text(liveStatus, style = MaterialTheme.typography.labelLarge)
+                    }
                     if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
                     Text("Last successful update · ${displayTime(freight.retrieved)}", style = MaterialTheme.typography.bodySmall)
                     if (page.freight.size > 1) {
@@ -714,7 +755,8 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         ActionButton(if (item == null) "Save enquiry" else "Edit saved") {
                             editing = item ?: Saved(page.query.storageKey, "", false, false)
                         }
-                        ActionButton("Export report") { exporting = true }
+                        ActionButton("Copy report") { app.copy("Freight report", Reports.text(freight)) }
+                        OutlinedButton(onClick = { exporting = true }) { Text("Export file") }
                     }
                     if (freight.fnr.isNotBlank() && !page.query.isFnr) {
                         TextButton(onClick = { app.open(Query(freight.fnr), true) }, enabled = !app.loading) { Text("Open FNR ${freight.fnr}") }
@@ -735,7 +777,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                                 Text(freight.get(field))
                             }
                             if (freight.values.containsKey(field)) IconButton(onClick = { app.copy(field, freight.get(field)) }) {
-                                Icon(Icons.Default.Share, "Copy $field")
+                                Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
                             }
                         }
                     }
@@ -804,9 +846,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         FilterChip(reportFormat == format, { reportFormat = format }, { Text(format.name) })
                     }
                 }
-                TextButton(onClick = { exporting = false; app.export(freight, reportFormat, false) }) { Text("Save to device") }
-                TextButton(onClick = { exporting = false; app.export(freight, reportFormat, true) }) { Text("Android share sheet") }
-                TextButton(onClick = { exporting = false; app.export(freight, reportFormat, true, true) }) { Text("Share through WhatsApp") }
+                TextButton(onClick = { exporting = false; app.export(freight, reportFormat) }) { Text("Save to device") }
                 TextButton(onClick = { exporting = false; app.copy("Freight report", Reports.text(freight)) }) { Text("Copy complete report") }
             }
         }, confirmButton = { TextButton(onClick = { exporting = false }) { Text("Close") } })
