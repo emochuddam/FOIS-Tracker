@@ -2,6 +2,7 @@ package dev.foistracker
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -109,7 +112,7 @@ fun TrackerApp(app: MainActivity) {
                         }
                         Brand(Modifier.weight(1f))
                         if (page != null && challenge == null) {
-                            IconButton(onClick = { app.refresh(page.query) }, enabled = !app.loading) {
+                            IconButton(onClick = { app.refresh(page.query, notifyOnRefresh = true) }, enabled = !app.loading) {
                                 Icon(Icons.Default.Refresh, "Refresh freight")
                             }
                         }
@@ -256,7 +259,7 @@ private fun Home(app: MainActivity, signedIn: Boolean) {
             item { Title("Saved freight") }
             items(app.saved.take(4), key = { "saved/${it.key}" }) { item ->
                 EntryTile(item.name.ifBlank { Query.fromStorage(item.key).key },
-                    if (item.tracking) "Automatic tracking" else "Saved enquiry") { app.open(Query.fromStorage(item.key), true) }
+                    if (item.tracking) "Automatic tracking" else "Saved enquiry") { app.open(Query.fromStorage(item.key)) }
             }
         }
         if (app.history.isNotEmpty()) {
@@ -445,7 +448,7 @@ private fun ChallengeUi(app: MainActivity, challenge: Challenge) {
                     TextButton(onClick = {
                         val query = challenge.query
                         app.closeChallenge()
-                        if (query?.isFnr == true) app.beginChallenge(true, query)
+                        if (query?.isFnr == true) app.beginChallenge(true, query, challenge.notifyOnRefresh)
                         else if (query != null) app.message = "Station-pair enquiries require ECBS sign-in."
                     }, enabled = !app.loading) { Text("Continue as guest") }
                 }
@@ -474,6 +477,7 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
     var sort by remember { mutableStateOf("Favourites") }
     var editing by remember { mutableStateOf<Saved?>(null) }
     var deleting by remember { mutableStateOf<Saved?>(null) }
+    var draftKey by remember { mutableStateOf("") }
     val list = app.saved.filter {
         it.name.contains(filter, true) || Query.fromStorage(it.key).key.contains(filter, true)
     }.let { items ->
@@ -496,7 +500,10 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
                         FilterChip(sort == it, { sort = it }, { Text(it) })
                     }
                 }
-                ActionButton("Add saved freight") { editing = Saved("", "", false, false) }
+                ActionButton("Add saved freight") {
+                    draftKey = Query.parse(filter.ifBlank { app.queryText }, app.consignor)?.storageKey.orEmpty()
+                    editing = app.saved.find { it.key == draftKey } ?: Saved("", "", false, false)
+                }
             }
         }
         if (list.isEmpty()) item { Text("No saved entries match this search.") }
@@ -504,8 +511,9 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
             val query = Query.fromStorage(item.key)
             val freight = app.history.find { it.key == item.key }?.freight?.firstOrNull()
             Panel {
-                EntryTile(item.name.ifBlank { query.key }, query.key + if (item.favorite) " · Favourite" else "") { app.open(query, true) }
+                EntryTile(item.name.ifBlank { query.key }, query.key + if (item.favorite) " · Favourite" else "") { app.open(query) }
                 if (freight != null) {
+                    RouteSummary(freight, query, compact = true)
                     Text("ETA · ${displayFreightTime(freight.eta)}")
                     Text("Last reported · ${freight.get("Last reported station")}")
                 }
@@ -517,7 +525,7 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
             }
         }
     }
-    editing?.let { item -> SavedDialog(app, item) { editing = null } }
+    editing?.let { item -> SavedDialog(app, item, initialKey = draftKey) { editing = null } }
     deleting?.let { item ->
         AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete saved freight?") },
             text = { Text(item.name.ifBlank { Query.fromStorage(item.key).key }) },
@@ -527,12 +535,13 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
 }
 
 @Composable
-private fun SavedDialog(app: MainActivity, item: Saved, dismiss: () -> Unit) {
-    var key by remember { mutableStateOf(Query.fromStorage(item.key).key) }
+private fun SavedDialog(app: MainActivity, item: Saved, initialKey: String = "", dismiss: () -> Unit) {
+    val initial = Query.fromStorage(item.key.ifBlank { initialKey })
+    var key by remember(initial) { mutableStateOf(initial.key) }
     var name by remember { mutableStateOf(item.name) }
     var favorite by remember { mutableStateOf(item.favorite) }
     var tracking by remember { mutableStateOf(item.tracking) }
-    val query = if (item.key.isBlank()) Query.parse(key, app.consignor) else Query.fromStorage(item.key)
+    val query = if (item.key.isBlank()) Query.parse(key, initial.consignor.takeIf { initialKey.isNotBlank() } ?: app.consignor) else initial
     AlertDialog(onDismissRequest = dismiss, title = { Text(if (item.key.isBlank()) "Add saved freight" else "Edit saved freight") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -690,7 +699,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
     } ?: timeline.lastOrNull { freightTime(it.arrival) != null || freightTime(it.departure) != null }
         .takeIf { timeline.all { row -> freightTime(row.arrival) != null || freightTime(row.departure) != null } }
     val item = app.saved.find { it.key == page.query.storageKey }
-    PullToRefreshBox(isRefreshing = app.loading && !app.automaticRefresh, onRefresh = { app.refresh(page.query) }, modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = app.loading && !app.automaticRefresh, onRefresh = { app.refresh(page.query, notifyOnRefresh = true) }, modifier = Modifier.fillMaxSize()) {
         Feed {
             item {
                 Panel {
@@ -720,21 +729,10 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                             color = if (remaining > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
                     }
                     Text("${if (page.cached) "Cached result · " else ""}${freight.source}", style = MaterialTheme.typography.labelLarge)
-                    val liveStatus = when {
-                        app.automaticRefresh -> "Live refresh · checking FOIS"
-                        app.loading -> "Refreshing from FOIS"
-                        refreshIssue != null -> refreshIssue
-                        polling -> "Live refresh · checks every second"
-                        !signedIn && freight.arrived == null -> "Manual refresh · verification may be required"
-                        active -> "Live refresh paused"
-                        else -> "Showing last reported data"
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (polling || app.automaticRefresh) {
-                            val green = if (isSystemInDarkTheme()) Color(0xFF63E68A) else Color(0xFF198344)
-                            Box(Modifier.size(10.dp).background(green, CircleShape))
-                        }
-                        Text(liveStatus, style = MaterialTheme.typography.labelLarge)
+                    if (polling || app.automaticRefresh) {
+                        LiveRefreshLight()
+                    } else {
+                        refreshIssue?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
                     }
                     if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
                     Text("Last successful update · ${displayTime(freight.retrieved)}", style = MaterialTheme.typography.bodySmall)
@@ -748,9 +746,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                             }
                         }
                     }
-                    Text("${freight.get("Origin")} → ${freight.get("Destination")}", style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold)
-                    Text("Last reported station · ${freight.get("Last reported station")}")
+                    RouteSummary(freight, page.query)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ActionButton(if (item == null) "Save enquiry" else "Edit saved") {
                             editing = item ?: Saved(page.query.storageKey, "", false, false)
@@ -852,6 +848,34 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                 TextButton(onClick = { exporting = false; app.copy("Freight report", Reports.text(freight)) }) { Text("Copy complete report") }
             }
         }, confirmButton = { TextButton(onClick = { exporting = false }) { Text("Close") } })
+    }
+}
+
+@Composable
+private fun LiveRefreshLight() {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "Live refresh")
+    val alpha by transition.animateFloat(
+        initialValue = 1f, targetValue = 0.25f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(650),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ), label = "Green indicator"
+    )
+    val green = if (isSystemInDarkTheme()) Color(0xFF63E68A) else Color(0xFF198344)
+    Box(Modifier.size(10.dp).graphicsLayer { this.alpha = alpha }.background(green, CircleShape)
+        .semantics { contentDescription = "Live refresh active" })
+}
+
+@Composable
+private fun RouteSummary(freight: Freight, query: Query, compact: Boolean = false) {
+    val origin = freight.values["Origin"] ?: query.key.substringBefore(' ').takeUnless { query.isFnr } ?: "Not Reported"
+    val destination = freight.values["Destination"] ?: query.key.substringAfter(' ').takeUnless { query.isFnr } ?: "Not Reported"
+    if (!compact) Label("ROUTE SUMMARY")
+    Text("$origin → $destination", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    if (!compact) {
+        Text("Last reported station · ${freight.get("Last reported station")}")
+        freight.values["Freight status"]?.let { Text("Status · $it") }
+        freight.values["Consignment detail"]?.let { Text("Consignment detail · $it") }
     }
 }
 

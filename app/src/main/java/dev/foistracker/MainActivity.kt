@@ -32,7 +32,8 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
 
-data class Challenge(val guest: Boolean, val query: Query?, val image: Bitmap? = null, val revision: Int = 0)
+data class Challenge(val guest: Boolean, val query: Query?, val image: Bitmap? = null, val revision: Int = 0,
+    val notifyOnRefresh: Boolean = false)
 data class ResultPage(val query: Query, val freight: List<Freight>, val cached: Boolean, val selected: Int = 0)
 
 class MainActivity : FragmentActivity() {
@@ -245,13 +246,13 @@ class MainActivity : FragmentActivity() {
         refreshIssue = null
         val cached = history.find { it.key == query.storageKey }?.freight.orEmpty()
         if (cached.isNotEmpty()) page = ResultPage(query, cached, true)
-        if (cachedOnly && cached.isNotEmpty()) return
+        if (cached.isNotEmpty() && (cachedOnly || !canReachInternet())) return
         message = null
         if (services.signedIn.value) refresh(query)
         else beginChallenge(query.isFnr, query)
     }
 
-    internal fun refresh(query: Query, automatic: Boolean = false) {
+    internal fun refresh(query: Query, automatic: Boolean = false, notifyOnRefresh: Boolean = false) {
         if (loading || automatic && (page?.query != query || !foreground || locked || challenge != null)) return
         if (!automatic) {
             message = null
@@ -266,7 +267,7 @@ class MainActivity : FragmentActivity() {
         }
         if (!services.signedIn.value) {
             if (automatic) refreshIssue = query to "Live refresh paused · sign-in required"
-            else beginChallenge(query.isFnr, query)
+            else beginChallenge(query.isFnr, query, notifyOnRefresh)
             return
         }
         execute(quietQuery = query.takeIf { automatic }) {
@@ -275,9 +276,7 @@ class MainActivity : FragmentActivity() {
                     try {
                         val fresh = services.client.enquiry(query)
                         services.persistSession()
-                        val tracked = services.store.record(query.storageKey, fresh)
-                        if (query.isFnr && tracked.firstOrNull()?.arrived != null) services.store.pause(query.storageKey)
-                        tracked
+                        recordRefresh(query, fresh, notifyOnRefresh)
                     } catch (e: FoisError.Authentication) {
                         services.forgetSession()
                         throw e
@@ -295,21 +294,21 @@ class MainActivity : FragmentActivity() {
                 }
                 withContext(Dispatchers.Main) {
                     message = "Your ECBS session ended. Sign in again to continue."
-                    initializeChallenge(false, query)
+                    initializeChallenge(false, query, notifyOnRefresh)
                 }
                 loadChallenge(reset = true)
             }
         }
     }
 
-    internal fun beginChallenge(guest: Boolean, query: Query? = null) {
+    internal fun beginChallenge(guest: Boolean, query: Query? = null, notifyOnRefresh: Boolean = false) {
         if (loading) return
-        initializeChallenge(guest, query)
+        initializeChallenge(guest, query, notifyOnRefresh)
         execute { loadChallenge(reset = true) }
     }
 
-    private fun initializeChallenge(guest: Boolean, query: Query?) {
-        challenge = Challenge(guest, query)
+    private fun initializeChallenge(guest: Boolean, query: Query?, notifyOnRefresh: Boolean) {
+        challenge = Challenge(guest, query, notifyOnRefresh = notifyOnRefresh)
         remembered = ""
         storedPassword = ""
     }
@@ -356,7 +355,7 @@ class MainActivity : FragmentActivity() {
                 val result = services.networkLock.withLock {
                     if (current.guest) {
                         val query = requireNotNull(current.query)
-                        services.store.record(query.storageKey, listOf(services.client.publicFnr(query.key, answer.trim())))
+                        recordRefresh(query, listOf(services.client.publicFnr(query.key, answer.trim())), current.notifyOnRefresh)
                     } else {
                         services.client.signIn(user.trim(), password, answer.trim())
                         services.persistSession()
@@ -373,7 +372,7 @@ class MainActivity : FragmentActivity() {
                 }
                 withContext(Dispatchers.Main) {
                     closeChallenge()
-                    if (!current.guest) message = "Signed in to ECBS."
+                    if (!current.guest) message = if (current.query == null) "Signed in to ECBS." else null
                 }
                 val query = current.query
                 if (query != null) {
@@ -383,7 +382,7 @@ class MainActivity : FragmentActivity() {
                             try {
                                 val rows = services.client.enquiry(query)
                                 services.persistSession()
-                                services.store.record(query.storageKey, rows)
+                                recordRefresh(query, rows, current.notifyOnRefresh)
                             } catch (e: FoisError.Authentication) {
                                 services.forgetSession()
                                 throw e
@@ -406,6 +405,19 @@ class MainActivity : FragmentActivity() {
                 loadChallenge(reset = true)
             }
         }
+    }
+
+    private fun recordRefresh(query: Query, rows: List<Freight>, notifyOnRefresh: Boolean): List<Freight> {
+        val key = query.storageKey
+        val previous = services.store.cached(key)
+        val updated = services.store.record(key, rows)
+        Tracking.notifyChanges(this, services, key, previous, updated)
+        if (notifyOnRefresh) {
+            Tracking.notify(this, services, key, Alert.REFRESH, "Latest freight details are available.",
+                updated.maxOf(Freight::retrieved).toString())
+        }
+        if (query.isFnr && updated.firstOrNull()?.arrived != null) services.store.pause(key)
+        return updated
     }
 
     private suspend fun show(query: Query, result: List<Freight>) = withContext(Dispatchers.Main) {

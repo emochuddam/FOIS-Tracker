@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+- Added route summaries to freight results and saved freight cards.
+- Replaced live-check text with a blinking green status light.
+- Send completion notifications for manual refresh and freight-change notifications during automatic tracking.
+- Prefill the save dialog and open saved freight with the same enquiry flow as Search.
+
 ## 1.0.3
 
 - Recognize formatted FNRs on FOIS receipt pages and fall back to the first receipt when a link is absent.

@@ -62,6 +62,10 @@ class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 1)
             }
         }
     }
+    private val retainedDetailFields = setOf("Railway receipt", "Rake identification", "Origin", "Destination", "Commodity",
+        "Consignor", "Consignee", "Booking date", "Loading date", "Departure date", "Consignment detail",
+        "Load type", "Actual arrival")
+
     fun record(key: String, result: List<Freight>): List<Freight> {
         val db = writableDatabase
         db.beginTransaction()
@@ -82,7 +86,11 @@ class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 1)
                     })
                 }
                 val previousEta = if (row.eta != lastEta) lastEta else previous?.previousEta
-                row.copy(previousEta = previousEta)
+                val knownDetails = if (row.fnr.isNotEmpty()) previous?.values.orEmpty().filterKeys {
+                    it in retainedDetailFields
+                } else emptyMap()
+                row.copy(values = knownDetails + row.values, previousEta = previousEta,
+                    journey = row.journey.ifEmpty { previous?.journey.orEmpty() })
             }
             db.insertWithOnConflict("enquiry", null, ContentValues().apply {
                 put("query", key); put("results", JSONArray(results.map(::encode)).toString())

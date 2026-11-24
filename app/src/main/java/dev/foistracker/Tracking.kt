@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 enum class Alert(val label: String) {
     ETA("ETA changed"), ARRIVED("Consignment arrived"), MOVEMENT("New station movement"),
     STATUS("Freight status changed"), DELAY("Significant delay"), SESSION("Session expired"),
-    AUTH("Authentication required"), ERROR("Tracking failure"), RESUMED("Tracking resumed")
+    AUTH("Authentication required"), ERROR("Tracking failure"), RESUMED("Tracking resumed"), REFRESH("Freight refreshed")
 }
 
 fun freightAlerts(old: Freight?, next: Freight): List<Pair<Alert, String>> = buildList {
@@ -65,6 +65,18 @@ object Tracking {
         }
         return id
     }
+    fun notifyChanges(context: Context, services: Services, key: String, previous: List<Freight>, updated: List<Freight>) {
+        for (row in updated) {
+            val rake = row.values["Rake identification"]
+            val old = previous.firstOrNull {
+                if (row.fnr.isNotEmpty()) it.fnr == row.fnr else rake != null && it.values["Rake identification"] == rake
+            } ?: continue
+            freightAlerts(old, row).forEach { (alert, text) ->
+                notify(context, services, key, alert, text, "${row.fnr.ifEmpty { rake.orEmpty() }}|${old.retrieved}|$text")
+            }
+        }
+    }
+
     fun notify(context: Context, services: Services, key: String, alert: Alert, text: String, fingerprint: String = text) {
         if (!services.settings.getBoolean("alert_${alert.name}", true)) return
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
@@ -98,15 +110,12 @@ class FreightWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     return Result.success()
                 }
                 try {
-                    val old = services.store.cached(item.key).firstOrNull()
+                    val old = services.store.cached(item.key)
                     val query = Query.fromStorage(item.key)
                     if (!query.isFnr) return@withLock
                     val next = services.store.record(item.key, services.client.enquiry(query)).first()
                     services.persistSession()
-                    freightAlerts(old, next).forEach { (alert, text) ->
-                        Tracking.notify(applicationContext, services, item.key, alert, text,
-                            "${old?.retrieved}|$text")
-                    }
+                    Tracking.notifyChanges(applicationContext, services, item.key, old, listOf(next))
                     if (next.arrived != null) services.store.pause(item.key)
                     services.store.clearAlert(item.key, Alert.ERROR.name)
                 } catch (_: FoisError.Authentication) {

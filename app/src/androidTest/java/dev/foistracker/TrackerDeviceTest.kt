@@ -36,10 +36,12 @@ class TrackerDeviceTest {
         val fnr = "01234567890"
         compose.runOnIdle {
             compose.activity.page = ResultPage(Query(fnr),
-                listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415"))), true)
+                listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415", "Origin" to "RMN", "Destination" to "CFS"))), true)
         }
         compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
         compose.onAllNodesWithText("415 km")[0].assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("RMN → CFS"))
+        compose.onNodeWithText("RMN → CFS").assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
         compose.onNodeWithText("Collapse").assertIsDisplayed()
     }
@@ -57,12 +59,22 @@ class TrackerDeviceTest {
         compose.onNodeWithText("Live refresh paused", substring = true).assertIsDisplayed()
     }
 
+    @Test fun addSavedFreightPrefillsTheEnteredNumber() {
+        val fnr = "01234567890"
+        compose.onNodeWithText("Tracking").performClick()
+        compose.onNodeWithText("Find saved freight").performTextInput(fnr)
+        compose.onNodeWithText("Add saved freight").performClick()
+        compose.onNodeWithText(fnr).assertIsDisplayed()
+        compose.onNodeWithText("Save").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+    }
+
     @Test fun persistsSavedAndCachedFreightAndDeduplicatesAlerts() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val key = "01234567891"
         Store(context).use { first ->
             first.save(Saved(key, "Fixture freight", true, true))
-            first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 12:00"))))
+            first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 12:00", "Origin" to "RMN"))))
             first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 14:00"))))
             assertTrue(first.registerAlert(key, "TEST", "fixture"))
             assertFalse(first.registerAlert(key, "TEST", "fixture"))
@@ -73,6 +85,7 @@ class TrackerDeviceTest {
             assertTrue(saved.favorite)
             assertFalse(saved.tracking)
             assertEquals("24-11-2026 12:00", second.cached(key).single().previousEta)
+            assertEquals("RMN", second.cached(key).single().get("Origin"))
             second.delete(key)
             second.clearAlert(key, "TEST")
         }
