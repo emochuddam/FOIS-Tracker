@@ -1,6 +1,7 @@
 package dev.foistracker
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -64,7 +65,7 @@ class TrackerDeviceTest {
         compose.onNodeWithText("Tracking").performClick()
         compose.onNodeWithText("Find saved freight").performTextInput(fnr)
         compose.onNodeWithText("Add saved freight").performClick()
-        compose.onNodeWithText(fnr).assertIsDisplayed()
+        compose.onNodeWithText("FNR or station pair").assertTextContains(fnr)
         compose.onNodeWithText("Save").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
     }
