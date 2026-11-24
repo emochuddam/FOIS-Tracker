@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -453,7 +454,7 @@ class MainActivity : FragmentActivity() {
     }
     internal fun copy(label: String, text: String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
-        message = "Copied to clipboard."
+        if (Build.VERSION.SDK_INT < 33) Toast.makeText(this, "Copied to clipboard", Toast.LENGTH_SHORT).show()
     }
     internal fun paste(): String = getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
         ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()

@@ -643,6 +643,12 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
 @Composable
 private fun FreightUi(app: MainActivity, page: ResultPage) {
     val freight = page.freight.getOrNull(page.selected) ?: return
+    val distance = freight.values["Remaining distance"]
+    val distanceText = when {
+        distance == null -> "Not Reported"
+        distance.any(Char::isLetter) -> distance
+        else -> "$distance km"
+    }
     val signedIn by app.services.signedIn.collectAsState()
     val active = signedIn && app.foreground && !app.locked && app.challenge == null && freight.arrived == null
     val refreshIssue = app.refreshIssue?.takeIf { it.first == page.query }?.second
@@ -693,12 +699,6 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                     Text(displayFreightTime(freight.arrived ?: freight.eta), fontSize = 40.sp,
                         lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Label("REMAINING DISTANCE")
-                    val distance = freight.values["Remaining distance"]
-                    val distanceText = when {
-                        distance == null -> "Not Reported"
-                        distance.any(Char::isLetter) -> distance
-                        else -> "$distance km"
-                    }
                     Text(distanceText, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
                     if (freight.arrived != null && freight.eta != null) Text("Last ETA · ${displayFreightTime(freight.eta)}")
                     val previous = freightTime(freight.previousEta)
@@ -774,7 +774,9 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Label(field)
-                                Text(freight.get(field))
+                                if (field == "Remaining distance") {
+                                    Text(distanceText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                } else Text(freight.get(field))
                             }
                             if (freight.values.containsKey(field)) IconButton(onClick = { app.copy(field, freight.get(field)) }) {
                                 Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
