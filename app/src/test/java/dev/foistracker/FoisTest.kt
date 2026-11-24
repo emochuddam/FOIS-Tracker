@@ -182,6 +182,17 @@ class FoisTest {
         assertEquals("Qry=CRT_LOCN&txtSttnCode=&txtSttnName=ALPHA&hidreset=A", post.body.readUtf8())
     }
 
+    @Test fun resolvesVerifiedNamesForLastReportedStationCodes() {
+        val kohli = Freight(mapOf("Last reported station" to "KOHL"))
+        assertEquals("KOHL (KOHLI)", kohli.get("Last reported station"))
+        assertEquals("KOHL (KOHLI)", reportedStationLabel("Kohli (KOHL)", emptyList()))
+        val journey = listOf(Journey("Some Station (AAAA)", "", "", "", "", ""))
+        assertEquals("AAAA (SOME STATION)", reportedStationLabel("AAAA", journey))
+        assertEquals("ZZZZ", reportedStationLabel("ZZZZ", emptyList()))
+        val old = Freight(mapOf("Last reported station" to "NGP"))
+        assertEquals(Alert.MOVEMENT to "KOHL (KOHLI)", freightAlerts(old, kohli).single())
+    }
+
     @Test fun notificationShowsEtaAndDistinguishesConfirmedArrival() {
         val estimate = Freight(mapOf("FNR" to "01234567890", "Expected arrival" to "24-11-2026 12:00"))
         val completed = Freight(mapOf("FNR" to "01234567891", "Actual arrival" to "24-11-2026 10:30"))

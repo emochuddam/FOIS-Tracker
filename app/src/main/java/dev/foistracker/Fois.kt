@@ -33,7 +33,10 @@ data class Freight(val values: Map<String, String>, val journey: List<Journey> =
     val fnr get() = values["FNR"].orEmpty()
     val eta get() = values["Expected arrival"]
     val arrived get() = values["Actual arrival"]
-    fun get(key: String) = values[key] ?: "Not Reported"
+    fun get(key: String): String {
+        val value = values[key] ?: return "Not Reported"
+        return if (key == "Last reported station") reportedStationLabel(value, journey) else value
+    }
 }
 
 data class Query(val key: String, val consignor: String = "FCI") {

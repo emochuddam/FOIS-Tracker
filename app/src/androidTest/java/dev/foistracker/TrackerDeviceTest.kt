@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import androidx.test.rule.GrantPermissionRule
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
@@ -22,6 +23,24 @@ class TrackerDeviceTest {
         if (android.os.Build.VERSION.SDK_INT >= 33) GrantPermissionRule.grant(android.Manifest.permission.POST_NOTIFICATIONS)
         else org.junit.rules.TestRule { statement, _ -> statement }
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before
+    fun chooseInitialTheme() {
+        if (compose.onAllNodesWithText("Choose your theme").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithText("System").performClick()
+        }
+    }
+
+    @Test fun savesThemeChoiceAcrossActivityRecreation() {
+        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText("Dark").performClick()
+        compose.runOnIdle { assertEquals(ThemeMode.DARK, compose.activity.themeMode) }
+        compose.activityRule.scenario.recreate()
+        compose.runOnIdle {
+            assertEquals(ThemeMode.DARK, compose.activity.themeMode)
+            compose.activity.chooseTheme(ThemeMode.SYSTEM)
+        }
+    }
 
     @Test fun validatesFromHomeAndSearch() {
         compose.onNodeWithText("FNR or station pair").performTextInput("123")
@@ -36,12 +55,15 @@ class TrackerDeviceTest {
         val fnr = "01234567890"
         compose.runOnIdle {
             compose.activity.page = ResultPage(Query(fnr),
-                listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415", "Origin" to "RMN", "Destination" to "CFS"))), true)
+                listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415", "Origin" to "RMN", "Destination" to "CFS",
+                    "Last reported station" to "KOHL"))), true)
         }
         compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
         compose.onAllNodesWithText("415 km")[0].assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("RMN → CFS"))
         compose.onNodeWithText("RMN → CFS").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Last reported station · KOHL (KOHLI)"))
+        compose.onNodeWithText("Last reported station · KOHL (KOHLI)").assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
         compose.onNodeWithText("Collapse").assertIsDisplayed()
     }

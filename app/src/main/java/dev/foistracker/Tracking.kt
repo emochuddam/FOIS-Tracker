@@ -38,7 +38,7 @@ fun freightAlerts(old: Freight?, next: Freight): List<Pair<Alert, String>> = bui
     val movement = next.values["Last reported movement"]
     if (station != null && (station != old.values["Last reported station"] ||
             movement != null && movement != old.values["Last reported movement"])) {
-        add(Alert.MOVEMENT to listOfNotNull(station, movement).joinToString(" • "))
+        add(Alert.MOVEMENT to listOfNotNull(next.get("Last reported station"), movement).joinToString(" • "))
     }
     val status = next.values["Freight status"]
     if (status != null && status != old.values["Freight status"]) add(Alert.STATUS to status)

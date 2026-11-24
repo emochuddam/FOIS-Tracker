@@ -65,6 +65,8 @@ import java.time.Duration
 import java.time.Instant
 
 private val actionGradient = Brush.horizontalGradient(listOf(Color(0xFF106FCA), Color(0xFF3920EB)))
+private val LocalDarkAppearance = compositionLocalOf { false }
+private val darkActionGradient = Brush.horizontalGradient(listOf(Color(0xFF7544D7), Color(0xFF5445CC)))
 private val light = lightColorScheme(
     primary = Color(0xFF3325CA), onPrimary = Color.White, primaryContainer = Color(0xFFE7E8FF),
     onPrimaryContainer = Color(0xFF211680), secondary = Color(0xFF485671), secondaryContainer = Color(0xFFE5EBF6),
@@ -74,18 +76,23 @@ private val light = lightColorScheme(
     surfaceContainer = Color(0xFFF0F3FA), surfaceContainerHigh = Color(0xFFE9EDF7), outline = Color(0xFF677487)
 )
 private val dark = darkColorScheme(
-    primary = Color(0xFFBFC4FF), onPrimary = Color(0xFF262080), primaryContainer = Color(0xFF373274),
-    onPrimaryContainer = Color(0xFFE3E5FF), secondary = Color(0xFFB9C7E3), secondaryContainer = Color(0xFF343D57),
-    onSecondaryContainer = Color(0xFFE7EDFF), background = Color(0xFF151A28),
-    onBackground = Color(0xFFE9ECF7), surface = Color(0xFF22283A), onSurface = Color(0xFFE9ECF7),
-    surfaceVariant = Color(0xFF343E52), onSurfaceVariant = Color(0xFFC0C9DE),
-    surfaceContainer = Color(0xFF293044), surfaceContainerHigh = Color(0xFF30394E), outline = Color(0xFFA2ADC2)
+    primary = Color(0xFFBF9DFF), onPrimary = Color(0xFF33176D), primaryContainer = Color(0xFF342458),
+    onPrimaryContainer = Color(0xFFE8D9FF), secondary = Color(0xFFA8BFD6), secondaryContainer = Color(0xFF142B40),
+    onSecondaryContainer = Color(0xFFDBE9F7), background = Color(0xFF252C3B),
+    onBackground = Color(0xFFF3F7FF), surface = Color(0xFF0E1927), onSurface = Color(0xFFF3F7FF),
+    surfaceVariant = Color(0xFF192C3F), onSurfaceVariant = Color(0xFFABC0D5),
+    surfaceContainer = Color(0xFF112234), surfaceContainerHigh = Color(0xFF172B3F), outline = Color(0xFF7894B0)
 )
-private val trackerTypography = Typography().run {
-    val family = FontFamily(
-        Font(R.font.montserrat_regular), Font(R.font.montserrat_semibold, FontWeight.SemiBold),
-        Font(R.font.montserrat_bold, FontWeight.Bold)
-    )
+private val lightTypography = trackerTypography(FontFamily(
+    Font(R.font.montserrat_regular), Font(R.font.montserrat_semibold, FontWeight.SemiBold),
+    Font(R.font.montserrat_bold, FontWeight.Bold)
+))
+private val darkTypography = trackerTypography(FontFamily(
+    Font(R.font.prompt_regular), Font(R.font.prompt_semibold, FontWeight.SemiBold),
+    Font(R.font.prompt_bold, FontWeight.Bold)
+))
+
+private fun trackerTypography(family: FontFamily) = Typography().run {
     copy(
         displayLarge = displayLarge.copy(fontFamily = family), displayMedium = displayMedium.copy(fontFamily = family),
         displaySmall = displaySmall.copy(fontFamily = family), headlineLarge = headlineLarge.copy(fontFamily = family),
@@ -99,18 +106,14 @@ private val trackerTypography = Typography().run {
 }
 private val tabs = listOf("Home", "Search", "Tracking", "History", "Settings")
 private val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.LocationOn, Icons.AutoMirrored.Filled.List, Icons.Default.Settings)
-private val stations = listOf("RMN" to "Raman", "NDLS" to "New Delhi", "DLI" to "Delhi Junction",
-    "HWH" to "Howrah Junction", "CSMT" to "Chhatrapati Shivaji Maharaj Terminus",
-    "MAS" to "MGR Chennai Central", "SBC" to "KSR Bengaluru", "SC" to "Secunderabad Junction",
-    "BZA" to "Vijayawada Junction", "VSKP" to "Visakhapatnam", "BBS" to "Bhubaneswar",
-    "LKO" to "Lucknow", "CNB" to "Kanpur Central", "PNBE" to "Patna Junction", "BPL" to "Bhopal Junction",
-    "NGP" to "Nagpur Junction", "ADI" to "Ahmedabad Junction", "ST" to "Surat", "PUNE" to "Pune Junction",
-    "GZB" to "Ghaziabad", "TKD" to "Tughlakabad", "DDU" to "Pt. Deen Dayal Upadhyaya Junction", "CFS" to "")
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackerApp(app: MainActivity) {
-    val darkMode = isSystemInDarkTheme()
+    val darkMode = when (app.themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM, null -> isSystemInDarkTheme()
+    }
     val colors = if (darkMode) dark else light
     SideEffect {
         val bars = WindowCompat.getInsetsController(app.window, app.window.decorView)
@@ -120,96 +123,106 @@ fun TrackerApp(app: MainActivity) {
     val signedIn by app.services.signedIn.collectAsState()
     val backdrop = remember(darkMode) {
         Brush.linearGradient(
-            if (darkMode) listOf(Color(0xFF1E2940), Color(0xFF121625))
+            if (darkMode) listOf(Color(0xFF272D3F), Color(0xFF212632))
             else listOf(Color(0xFFD0DEE4), Color(0xFFEBEFF9))
         )
     }
-    MaterialTheme(colorScheme = colors, typography = trackerTypography) {
-        Box(Modifier.fillMaxSize().background(backdrop)) {
-            Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
-                .align(Alignment.TopCenter)) {
-                if (app.locked) {
-                    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-                        Brand()
-                        Text("Tracker locked", style = MaterialTheme.typography.headlineLarge)
-                        Spacer(Modifier.height(12.dp))
-                        ActionButton("Unlock") { app.authenticate(false) }
-                        app.message?.let { Text(it, Modifier.padding(top = 12.dp)) }
-                    }
-                } else {
-                    val challenge = app.challenge
-                    val page = app.page
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        if (challenge != null || page != null) {
-                            IconButton(onClick = { if (!app.loading || app.automaticRefresh) { if (challenge != null) app.closeChallenge() else app.page = null } }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                            }
+    CompositionLocalProvider(LocalDarkAppearance provides darkMode) {
+        MaterialTheme(colorScheme = colors, typography = if (darkMode) darkTypography else lightTypography) {
+            Box(Modifier.fillMaxSize().background(backdrop)) {
+                Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
+                    .align(Alignment.TopCenter)) {
+                    if (app.locked) {
+                        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+                            Brand()
+                            Text("Tracker locked", style = MaterialTheme.typography.headlineLarge)
+                            Spacer(Modifier.height(12.dp))
+                            ActionButton("Unlock") { app.authenticate(false) }
+                            app.message?.let { Text(it, Modifier.padding(top = 12.dp)) }
                         }
-                        Brand(Modifier.weight(1f))
-                        if (page != null && challenge == null) {
-                            IconButton(onClick = { app.refresh(page.query, notifyOnRefresh = true) }, enabled = !app.loading) {
-                                Icon(Icons.Default.Refresh, "Refresh freight")
+                    } else {
+                        val challenge = app.challenge
+                        val page = app.page
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            if (challenge != null || page != null) {
+                                IconButton(onClick = { if (!app.loading || app.automaticRefresh) { if (challenge != null) app.closeChallenge() else app.page = null } }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                                }
                             }
-                        }
-                    }
-                    app.message?.let { message ->
-                        Surface(color = colors.secondaryContainer, shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp)) {
-                            Row(Modifier.padding(start = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(message, Modifier.weight(1f).padding(vertical = 9.dp), style = MaterialTheme.typography.bodyMedium)
-                                IconButton(onClick = { app.message = null }) { Icon(Icons.Default.Close, "Dismiss message") }
-                            }
-                        }
-                    }
-                    if (app.loading && !app.automaticRefresh) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                    AnimatedContent(
-                        targetState = Triple(app.tab, page, challenge),
-                        modifier = Modifier.weight(1f),
-                        contentKey = { (tab, result, verification) ->
-                            when {
-                                result != null -> "result/${result.query.storageKey}"
-                                verification != null -> "verification"
-                                else -> "tab/$tab"
-                            }
-                        },
-                        transitionSpec = {
-                            val direction = if (targetState.first < initialState.first) -1 else 1
-                            (fadeIn(tween(200)) + slideInHorizontally(tween(240)) { it * direction / 20 }) togetherWith
-                                (fadeOut(tween(130)) + slideOutHorizontally(tween(200)) { -it * direction / 24 })
-                        },
-                        label = "Tracker screens"
-                    ) { (tab, result, verification) ->
-                        when {
-                            result != null -> FreightUi(app, result)
-                            verification != null -> ChallengeUi(app, verification)
-                            tab == 0 -> Home(app, signedIn)
-                            tab == 1 -> Search(app, signedIn)
-                            tab == 2 -> SavedScreen(app, signedIn)
-                            tab == 3 -> History(app)
-                            else -> Preferences(app, signedIn)
-                        }
-                    }
-                    if (challenge != null && page != null) {
-                        Dialog(onDismissRequest = { if (!app.loading) app.closeChallenge() },
-                            properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                            Surface(Modifier.fillMaxWidth(.95f).widthIn(max = 620.dp).fillMaxHeight(.88f),
-                                shape = RoundedCornerShape(28.dp), color = colors.background) {
-                                Column {
-                                    Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(app.message.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                                        IconButton(onClick = app::closeChallenge, enabled = !app.loading) {
-                                            Icon(Icons.Default.Close, "Close verification")
-                                        }
-                                    }
-                                    if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                                    ChallengeUi(app, challenge)
+                            Brand(Modifier.weight(1f))
+                            if (page != null && challenge == null) {
+                                IconButton(onClick = { app.refresh(page.query, notifyOnRefresh = true) }, enabled = !app.loading) {
+                                    Icon(Icons.Default.Refresh, "Refresh freight")
                                 }
                             }
                         }
+                        app.message?.let { message ->
+                            Surface(color = colors.secondaryContainer, shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp)) {
+                                Row(Modifier.padding(start = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(message, Modifier.weight(1f).padding(vertical = 9.dp), style = MaterialTheme.typography.bodyMedium)
+                                    IconButton(onClick = { app.message = null }) { Icon(Icons.Default.Close, "Dismiss message") }
+                                }
+                            }
+                        }
+                        if (app.loading && !app.automaticRefresh) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                        AnimatedContent(
+                            targetState = Triple(app.tab, page, challenge),
+                            modifier = Modifier.weight(1f),
+                            contentKey = { (tab, result, verification) ->
+                                when {
+                                    result != null -> "result/${result.query.storageKey}"
+                                    verification != null -> "verification"
+                                    else -> "tab/$tab"
+                                }
+                            },
+                            transitionSpec = {
+                                val direction = if (targetState.first < initialState.first) -1 else 1
+                                (fadeIn(tween(200)) + slideInHorizontally(tween(240)) { it * direction / 20 }) togetherWith
+                                    (fadeOut(tween(130)) + slideOutHorizontally(tween(200)) { -it * direction / 24 })
+                            },
+                            label = "Tracker screens"
+                        ) { (tab, result, verification) ->
+                            when {
+                                result != null -> FreightUi(app, result)
+                                verification != null -> ChallengeUi(app, verification)
+                                tab == 0 -> Home(app, signedIn)
+                                tab == 1 -> Search(app, signedIn)
+                                tab == 2 -> SavedScreen(app, signedIn)
+                                tab == 3 -> History(app)
+                                else -> Preferences(app, signedIn)
+                            }
+                        }
+                        if (challenge != null && page != null) {
+                            Dialog(onDismissRequest = { if (!app.loading) app.closeChallenge() },
+                                properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                                Surface(Modifier.fillMaxWidth(.95f).widthIn(max = 620.dp).fillMaxHeight(.88f),
+                                    shape = RoundedCornerShape(28.dp), color = colors.background) {
+                                    Column {
+                                        Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(app.message.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                            IconButton(onClick = app::closeChallenge, enabled = !app.loading) {
+                                                Icon(Icons.Default.Close, "Close verification")
+                                            }
+                                        }
+                                        if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                        ChallengeUi(app, challenge)
+                                    }
+                                }
+                            }
+                        }
+                        if (challenge == null && page == null) Navigation(app.tab) { app.tab = it; app.message = null }
                     }
-                    if (challenge == null && page == null) Navigation(app.tab) { app.tab = it; app.message = null }
                 }
+            }
+            if (app.themeMode == null && !app.locked && app.challenge == null) {
+                AlertDialog(
+                    onDismissRequest = { app.chooseTheme(ThemeMode.SYSTEM) },
+                    title = { Text("Choose your theme") },
+                    text = { ThemeChoices(selected = null, choose = app::chooseTheme) },
+                    confirmButton = {}
+                )
             }
         }
     }
@@ -255,7 +268,7 @@ private fun ActionButton(
         modifier = modifier.heightIn(min = 48.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .shadow(elevation, shape)
-            .then(if (enabled) Modifier.background(actionGradient, shape) else Modifier)
+            .then(if (enabled) Modifier.background(if (LocalDarkAppearance.current) darkActionGradient else actionGradient, shape) else Modifier)
     ) { Text(label, fontWeight = FontWeight.SemiBold) }
 }
 
@@ -294,7 +307,7 @@ private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScop
         modifier = modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(27.dp)),
         shape = RoundedCornerShape(27.dp),
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        border = BorderStroke(1.dp, colors.surface.copy(alpha = 0.8f))
+        border = BorderStroke(1.dp, if (LocalDarkAppearance.current) colors.outline.copy(alpha = 0.16f) else colors.surface.copy(alpha = 0.8f))
     ) {
         Column(Modifier.fillMaxWidth().background(sheen).padding(17.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
@@ -672,12 +685,23 @@ private fun SettingSwitch(label: String, checked: Boolean, update: (Boolean) -> 
 }
 
 @Composable
+private fun ThemeChoices(selected: ThemeMode?, choose: (ThemeMode) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ThemeMode.entries.forEach { mode ->
+            FilterChip(selected = selected == mode, onClick = { choose(mode) }, label = { Text(mode.label) })
+        }
+    }
+}
+
+@Composable
 private fun Preferences(app: MainActivity, signedIn: Boolean) {
     var clear by remember { mutableStateOf(false) }
     Feed {
         item {
             Panel {
                 Title("Settings")
+                Label("THEME")
+                ThemeChoices(app.themeMode, app::chooseTheme)
                 Label("ECBS ACCOUNT")
                 Text(if (signedIn) "ECBS session available" else "Guest")
                 ActionButton(if (signedIn) "Sign out" else "Sign in", !app.loading) {
@@ -889,7 +913,7 @@ private fun LiveRefreshLight() {
             repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
         ), label = "Green indicator"
     )
-    val green = if (isSystemInDarkTheme()) Color(0xFF63E68A) else Color(0xFF198344)
+    val green = if (LocalDarkAppearance.current) Color(0xFF63E68A) else Color(0xFF198344)
     Box(
         Modifier.size(22.dp).semantics { contentDescription = "Live refresh active" },
         contentAlignment = Alignment.Center

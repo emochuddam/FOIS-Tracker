@@ -7,6 +7,7 @@
 | [OkHttp](https://square.github.io/okhttp/) | 4.12.0, HTTPS and cookie scoping. MockWebServer for fixtures | Apache 2.0 |
 | [jsoup](https://github.com/jhy/jsoup) | 1.21.2, HTML parsing | MIT |
 | [Montserrat](https://github.com/JulietaUla/Montserrat) | Bundled Latin subset at three weights | SIL Open Font License 1.1 |
+| [Prompt](https://fonts.google.com/specimen/Prompt) | Bundled Latin and Thai subset at three weights | SIL Open Font License 1.1 |
 | [JUnit 4](https://github.com/junit-team/junit4) | 4.13.2, JVM tests | EPL 1.0 |
 
 

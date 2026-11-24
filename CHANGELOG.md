@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8
+
+- Added a first-launch and Settings choice for Light, Dark, or System.
+- Adapted the supplied dark kit with deep navy cards, violet accents, and Prompt typography.
+- Display known last-reported station names with their codes, including KOHL (KOHLI).
+
 ## 1.0.7
 
 - Applied the attached UI kit’s gradient palette, Montserrat typography, and softly raised controls.

@@ -35,6 +35,8 @@ import javax.net.ssl.SSLException
 
 data class Challenge(val guest: Boolean, val query: Query?, val image: Bitmap? = null, val revision: Int = 0,
     val notifyOnRefresh: Boolean = false)
+enum class ThemeMode(val label: String) { LIGHT("Light"), DARK("Dark"), SYSTEM("System") }
+
 data class ResultPage(val query: Query, val freight: List<Freight>, val cached: Boolean, val selected: Int = 0)
 
 class MainActivity : FragmentActivity() {
@@ -50,6 +52,8 @@ class MainActivity : FragmentActivity() {
     internal var message by mutableStateOf<String?>(null)
     internal var locked by mutableStateOf(false)
     internal var biometricEnabled by mutableStateOf(false)
+    internal var themeMode by mutableStateOf<ThemeMode?>(null)
+        private set
     internal var queryText by mutableStateOf("")
     internal var consignor by mutableStateOf("FCI")
     internal var foreground by mutableStateOf(false)
@@ -70,6 +74,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        themeMode = ThemeMode.entries.firstOrNull { it.name == services.settings.getString("theme_mode", null) }
         interval = services.settings.getLong("interval", 15)
         biometricEnabled = services.settings.getBoolean("biometric", false)
         locked = biometricEnabled
@@ -210,7 +215,17 @@ class MainActivity : FragmentActivity() {
         super.onResume()
         foreground = true
         updateNotificationState()
-        if (!locked && Build.VERSION.SDK_INT >= 33 && !notificationsAllowed &&
+        requestInitialNotificationPermission()
+    }
+
+    internal fun chooseTheme(mode: ThemeMode) {
+        themeMode = mode
+        services.settings.edit().putString("theme_mode", mode.name).apply()
+        requestInitialNotificationPermission()
+    }
+
+    private fun requestInitialNotificationPermission() {
+        if (foreground && themeMode != null && !locked && Build.VERSION.SDK_INT >= 33 && !notificationsAllowed &&
             !services.settings.getBoolean("notification_prompt_shown", false)) {
             enableNotifications()
         }
