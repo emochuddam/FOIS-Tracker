@@ -49,10 +49,8 @@ internal fun reportedStationLabel(station: String, journey: List<Journey>): Stri
             else -> null
         }
     }
-    val value = station.trim()
-    val explicit = splitStation(value)
-    val code = explicit?.first ?: value.takeIf(bareStationCode::matches) ?: return station
-    val name = explicit?.second ?: stationNames[code] ?: journey.asSequence()
+    val code = station.trim().takeIf(bareStationCode::matches) ?: return station
+    val name = stationNames[code] ?: journey.asSequence()
         .mapNotNull { splitStation(it.station) }.firstOrNull { it.first == code }?.second ?: return station
     if (name.equals(code, true)) return station
     return "$code (${name.uppercase(Locale.ROOT)})"

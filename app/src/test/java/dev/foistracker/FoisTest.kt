@@ -185,7 +185,7 @@ class FoisTest {
     @Test fun resolvesVerifiedNamesForLastReportedStationCodes() {
         val kohli = Freight(mapOf("Last reported station" to "KOHL"))
         assertEquals("KOHL (KOHLI)", kohli.get("Last reported station"))
-        assertEquals("KOHL (KOHLI)", reportedStationLabel("Kohli (KOHL)", emptyList()))
+        assertEquals("Kohli (KOHL)", reportedStationLabel("Kohli (KOHL)", emptyList()))
         val journey = listOf(Journey("Some Station (AAAA)", "", "", "", "", ""))
         assertEquals("AAAA (SOME STATION)", reportedStationLabel("AAAA", journey))
         assertEquals("ZZZZ", reportedStationLabel("ZZZZ", emptyList()))
