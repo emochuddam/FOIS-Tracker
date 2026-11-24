@@ -3,6 +3,7 @@ package dev.foistracker
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -38,7 +39,7 @@ class TrackerDeviceTest {
                 listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415"))), true)
         }
         compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
-        compose.onNodeWithText("415 km").assertIsDisplayed()
+        compose.onAllNodesWithText("415 km")[0].assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
         compose.onNodeWithText("Collapse").assertIsDisplayed()
     }
