@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.Fois" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#101E26</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="Theme.Fois.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#101E26</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.Fois</item>
+    </style>
+</resources>
