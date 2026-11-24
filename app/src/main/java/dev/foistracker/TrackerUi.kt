@@ -1,11 +1,7 @@
 package dev.foistracker
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -25,16 +21,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -45,13 +36,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,7 +53,6 @@ private val dark = darkColorScheme(primary = mint, onPrimary = Color(0xFF003829)
     onPrimaryContainer = Color(0xFFC3FFDD), background = Color(0xFF101E26), onBackground = Color(0xFFE5F5EF),
     surface = Color(0xFF162931), onSurface = Color(0xFFE9F6F0), surfaceVariant = Color(0xFF20383F),
     onSurfaceVariant = Color(0xFFB8CBCA), outline = Color(0xFF819C97), secondaryContainer = Color(0xFF25444B))
-private val LocalBackdrop = compositionLocalOf<Backdrop?> { null }
 private val tabs = listOf("Home", "Search", "Tracking", "History", "Settings")
 private val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.LocationOn, Icons.AutoMirrored.Filled.List, Icons.Default.Settings)
 private val stations = listOf("RMN" to "Raman", "NDLS" to "New Delhi", "DLI" to "Delhi Junction",
@@ -91,97 +74,79 @@ fun TrackerApp(app: MainActivity) {
         bars.isAppearanceLightNavigationBars = !darkMode
     }
     val signedIn by app.services.signedIn.collectAsState()
-    val backdrop = rememberLayerBackdrop()
     MaterialTheme(colorScheme = colors) {
         Box(Modifier.fillMaxSize().background(colors.background)) {
-            Box(Modifier.matchParentSize().layerBackdrop(backdrop).background(Brush.radialGradient(
-                if (darkMode) listOf(Color(0xFF214743), colors.background) else listOf(Color(0xFFC1E7D7), colors.background),
-                radius = 1300f
-            ))) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val rail = colors.primary.copy(alpha = if (darkMode) .16f else .14f)
-                    for (i in 0..12) {
-                        val y = size.height * (.56f + i * .052f)
-                        drawLine(rail, androidx.compose.ui.geometry.Offset(size.width * .15f, y),
-                            androidx.compose.ui.geometry.Offset(size.width, y + size.width * .4f), 1.dp.toPx())
+            Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
+                .align(Alignment.TopCenter)) {
+                if (app.locked) {
+                    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+                        Brand()
+                        Text("Tracker locked", style = MaterialTheme.typography.headlineLarge)
+                        Spacer(Modifier.height(12.dp))
+                        ActionButton("Unlock") { app.authenticate(false) }
+                        app.message?.let { Text(it, Modifier.padding(top = 12.dp)) }
                     }
-                }
-            }
-            CompositionLocalProvider(LocalBackdrop provides backdrop.takeIf {
-                android.os.Build.VERSION.SDK_INT >= 33
-            }) {
-                Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
-                    .align(Alignment.TopCenter)) {
-                    if (app.locked) {
-                        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-                            Brand()
-                            Text("Tracker locked", style = MaterialTheme.typography.headlineLarge)
-                            Spacer(Modifier.height(12.dp))
-                            GlassButton("Unlock") { app.authenticate(false) }
-                            app.message?.let { Text(it, Modifier.padding(top = 12.dp)) }
-                        }
-                    } else {
-                        val challenge = app.challenge
-                        val page = app.page
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            if (challenge != null || page != null) {
-                                IconButton(onClick = { if (!app.loading) { if (challenge != null) app.closeChallenge() else app.page = null } }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                                }
-                            }
-                            Brand(Modifier.weight(1f))
-                            if (page != null && challenge == null) {
-                                IconButton(onClick = { app.refresh(page.query) }, enabled = !app.loading) {
-                                    Icon(Icons.Default.Refresh, "Refresh freight")
-                                }
+                } else {
+                    val challenge = app.challenge
+                    val page = app.page
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        if (challenge != null || page != null) {
+                            IconButton(onClick = { if (!app.loading || app.automaticRefresh) { if (challenge != null) app.closeChallenge() else app.page = null } }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                             }
                         }
-                        app.message?.let { message ->
-                            Surface(color = colors.secondaryContainer, shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp)) {
-                                Row(Modifier.padding(start = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(message, Modifier.weight(1f).padding(vertical = 9.dp), style = MaterialTheme.typography.bodyMedium)
-                                    IconButton(onClick = { app.message = null }) { Icon(Icons.Default.Close, "Dismiss message") }
-                                }
+                        Brand(Modifier.weight(1f))
+                        if (page != null && challenge == null) {
+                            IconButton(onClick = { app.refresh(page.query) }, enabled = !app.loading) {
+                                Icon(Icons.Default.Refresh, "Refresh freight")
                             }
                         }
-                        if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                        Box(Modifier.weight(1f)) {
-                            when {
-                                page != null -> FreightUi(app, page)
-                                challenge != null -> ChallengeUi(app, challenge)
-                                else -> AnimatedContent(app.tab, label = "Primary navigation") { tab ->
-                                    when (tab) {
-                                        0 -> Home(app, signedIn)
-                                        1 -> Search(app, signedIn)
-                                        2 -> SavedScreen(app, signedIn)
-                                        3 -> History(app)
-                                        else -> Preferences(app, signedIn)
-                                    }
+                    }
+                    app.message?.let { message ->
+                        Surface(color = colors.secondaryContainer, shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp)) {
+                            Row(Modifier.padding(start = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(message, Modifier.weight(1f).padding(vertical = 9.dp), style = MaterialTheme.typography.bodyMedium)
+                                IconButton(onClick = { app.message = null }) { Icon(Icons.Default.Close, "Dismiss message") }
+                            }
+                        }
+                    }
+                    if (app.loading && !app.automaticRefresh) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                    Box(Modifier.weight(1f)) {
+                        when {
+                            page != null -> FreightUi(app, page)
+                            challenge != null -> ChallengeUi(app, challenge)
+                            else -> AnimatedContent(app.tab, label = "Primary navigation") { tab ->
+                                when (tab) {
+                                    0 -> Home(app, signedIn)
+                                    1 -> Search(app, signedIn)
+                                    2 -> SavedScreen(app, signedIn)
+                                    3 -> History(app)
+                                    else -> Preferences(app, signedIn)
                                 }
                             }
                         }
-                        if (challenge != null && page != null) {
-                            Dialog(onDismissRequest = { if (!app.loading) app.closeChallenge() },
-                                properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                                Surface(Modifier.fillMaxWidth(.95f).widthIn(max = 620.dp).fillMaxHeight(.88f),
-                                    shape = RoundedCornerShape(28.dp), color = colors.background) {
-                                    Column {
-                                        Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Text(app.message.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                                            IconButton(onClick = app::closeChallenge, enabled = !app.loading) {
-                                                Icon(Icons.Default.Close, "Close verification")
-                                            }
+                    }
+                    if (challenge != null && page != null) {
+                        Dialog(onDismissRequest = { if (!app.loading) app.closeChallenge() },
+                            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                            Surface(Modifier.fillMaxWidth(.95f).widthIn(max = 620.dp).fillMaxHeight(.88f),
+                                shape = RoundedCornerShape(28.dp), color = colors.background) {
+                                Column {
+                                    Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(app.message.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                        IconButton(onClick = app::closeChallenge, enabled = !app.loading) {
+                                            Icon(Icons.Default.Close, "Close verification")
                                         }
-                                        if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                                        CompositionLocalProvider(LocalBackdrop provides null) { ChallengeUi(app, challenge) }
                                     }
+                                    if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                    ChallengeUi(app, challenge)
                                 }
                             }
                         }
-                        if (challenge == null && page == null) Navigation(app.tab) { app.tab = it; app.message = null }
                     }
+                    if (challenge == null && page == null) Navigation(app.tab) { app.tab = it; app.message = null }
                 }
             }
         }
@@ -200,59 +165,31 @@ private fun Brand(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Modifier.glass(alpha: Float = .73f, shape: RoundedCornerShape = RoundedCornerShape(28.dp)): Modifier {
-    val background = MaterialTheme.colorScheme.surface
-    val backdrop = LocalBackdrop.current
-    return if (backdrop == null) clip(shape).background(background)
-    else drawBackdrop(backdrop = backdrop, shape = { shape }, effects = {
-        vibrancy()
-        blur(8.dp.toPx())
-        lens(13.dp.toPx(), 24.dp.toPx())
-    }, onDrawSurface = { drawRect(background.copy(alpha = alpha)) }).clip(shape)
-}
-
-@Composable
-private fun GlassButton(label: String, enabled: Boolean = true, action: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .96f else 1f, label = "Glass press")
-    val haptic = LocalHapticFeedback.current
-    val shape = RoundedCornerShape(50)
-    Row(Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.glass(.62f, shape)
-        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .48f), shape)
-        .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, role = Role.Button) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            action()
-        }.heightIn(min = 48.dp).padding(horizontal = 22.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-            fontWeight = FontWeight.Bold)
-    }
+private fun ActionButton(label: String, enabled: Boolean = true, action: () -> Unit) {
+    Button(onClick = action, enabled = enabled) { Text(label) }
 }
 
 @Composable
 private fun Navigation(selected: Int, select: (Int) -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).glass(.79f, RoundedCornerShape(32.dp))
-        .padding(horizontal = 3.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+    NavigationBar(windowInsets = WindowInsets(0)) {
         tabs.forEachIndexed { index, title ->
-            val color by animateColorAsState(if (index == selected) MaterialTheme.colorScheme.primaryContainer
-                else Color.Transparent, label = "Navigation selection")
-            Column(Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(color)
-                .clickable(role = Role.Tab) { haptic.performHapticFeedback(HapticFeedbackType.LongPress); select(index) }
-                .heightIn(min = 54.dp).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center) {
-                Icon(icons[index], null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
-                Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
-            }
+            NavigationBarItem(
+                selected = index == selected,
+                onClick = { select(index) },
+                icon = { Icon(icons[index], null) },
+                label = { Text(title) }
+            )
         }
     }
 }
 
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().glass().padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
+    Card(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
+    }
 }
+
 @Composable
 private fun Label(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
@@ -275,7 +212,7 @@ private fun Home(app: MainActivity, signedIn: Boolean) {
                 Label("RAIL FREIGHT ENQUIRY")
                 Text("Track your freight", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
                 SearchInput(app)
-                GlassButton("Search freight", !app.loading) { app.search() }
+                ActionButton("Search freight", !app.loading) { app.search() }
             }
         }
         item {
@@ -338,7 +275,7 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                         TextButton(onClick = { origin = ""; dest = "" }) { Text("Clear") }
                     }
                 } else SearchInput(app)
-                GlassButton("Search freight", !app.loading) {
+                ActionButton("Search freight", !app.loading) {
                     focus.clearFocus()
                     keyboard?.hide()
                     if (route) {
@@ -473,7 +410,7 @@ private fun ChallengeUi(app: MainActivity, challenge: Challenge) {
                     SettingSwitch("Store password on this device", savePassword) { savePassword = it }
                     if (savePassword) Text("Encrypted with Android Keystore. You must still complete FOIS verification.")
                 }
-                GlassButton(if (challenge.guest) "Submit enquiry" else "Secure sign in", !app.loading && bitmap != null) {
+                ActionButton(if (challenge.guest) "Submit enquiry" else "Secure sign in", !app.loading && bitmap != null) {
                     app.submit(username, password, answer, rememberUser, savePassword)
                 }
                 if (!challenge.guest) {
@@ -531,7 +468,7 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
                         FilterChip(sort == it, { sort = it }, { Text(it) })
                     }
                 }
-                GlassButton("Add saved freight") { editing = Saved("", "", false, false) }
+                ActionButton("Add saved freight") { editing = Saved("", "", false, false) }
             }
         }
         if (list.isEmpty()) item { Text("No saved entries match this search.") }
@@ -622,7 +559,7 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
                 Title("Settings")
                 Label("ECBS ACCOUNT")
                 Text(if (signedIn) "ECBS session available" else "Guest")
-                GlassButton(if (signedIn) "Sign out" else "Sign in", !app.loading) {
+                ActionButton(if (signedIn) "Sign out" else "Sign in", !app.loading) {
                     if (signedIn) app.logout() else app.beginChallenge(false)
                 }
                 SettingSwitch("Fingerprint / biometric app lock", app.biometricEnabled) {
@@ -680,7 +617,8 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
     val freight = page.freight.getOrNull(page.selected) ?: return
     val signedIn by app.services.signedIn.collectAsState()
     val active = signedIn && app.foreground && !app.locked && app.challenge == null && freight.arrived == null
-    val polling = active && app.message == null && !app.loading
+    val refreshIssue = app.refreshIssue?.takeIf { it.first == page.query }?.second
+    val polling = active && refreshIssue == null && app.message == null && !app.loading
     var elapsed by remember(freight.retrieved) { mutableLongStateOf(0) }
     LaunchedEffect(freight.retrieved, app.foreground, page.cached) {
         while (app.foreground && !page.cached) {
@@ -692,8 +630,8 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
     LaunchedEffect(page.query.storageKey, freight.retrieved, polling) {
         if (polling) {
             // Start the next interval after the previous request finishes.
-            delay(30_000)
-            app.refresh(page.query)
+            delay(1_000)
+            app.refresh(page.query, automatic = true)
         }
     }
     var stationFilter by remember(page.query.storageKey, page.selected) { mutableStateOf("") }
@@ -718,7 +656,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
     } ?: timeline.lastOrNull { freightTime(it.arrival) != null || freightTime(it.departure) != null }
         .takeIf { timeline.all { row -> freightTime(row.arrival) != null || freightTime(row.departure) != null } }
     val item = app.saved.find { it.key == page.query.storageKey }
-    PullToRefreshBox(isRefreshing = app.loading, onRefresh = { app.refresh(page.query) }, modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = app.loading && !app.automaticRefresh, onRefresh = { app.refresh(page.query) }, modifier = Modifier.fillMaxSize()) {
         Feed {
             item {
                 Panel {
@@ -747,8 +685,10 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                     }
                     Text("${if (page.cached) "Cached result · " else ""}${freight.source}", style = MaterialTheme.typography.labelLarge)
                     val liveStatus = when {
+                        app.automaticRefresh -> "Live refresh · checking FOIS"
                         app.loading -> "Refreshing from FOIS"
-                        polling -> "Live refresh · checks every 30 seconds"
+                        refreshIssue != null -> refreshIssue
+                        polling -> "Live refresh · checks every second"
                         !signedIn && freight.arrived == null -> "Manual refresh · verification may be required"
                         active -> "Live refresh paused"
                         else -> "Showing last reported data"
@@ -771,10 +711,10 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         fontWeight = FontWeight.SemiBold)
                     Text("Last reported station · ${freight.get("Last reported station")}")
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        GlassButton(if (item == null) "Save enquiry" else "Edit saved") {
+                        ActionButton(if (item == null) "Save enquiry" else "Edit saved") {
                             editing = item ?: Saved(page.query.storageKey, "", false, false)
                         }
-                        GlassButton("Export report") { exporting = true }
+                        ActionButton("Export report") { exporting = true }
                     }
                     if (freight.fnr.isNotBlank() && !page.query.isFnr) {
                         TextButton(onClick = { app.open(Query(freight.fnr), true) }, enabled = !app.loading) { Text("Open FNR ${freight.fnr}") }

@@ -12,7 +12,7 @@ Debug builds are signed for testing. Android requires the same signing certifica
 
 ## Freight enquiries
 
-The app follows the device theme. While an authenticated result is open, the Live refresh indicator shows that the app checks FOIS every 30 seconds. The result still shows the latest movement reported by FOIS. On Android 13 and later, the app requests permission for notifications. You can also enable them under **Settings → Notifications**.
+The app uses a simple Material 3 theme that follows the device. While an authenticated result is open in the foreground, live refresh starts a new check one second after the last request finishes. Refresh and pause status appear inline. The result still shows the latest movement reported by FOIS. On Android 13 and later, the app requests permission for notifications. You can also enable them under **Settings → Notifications**.
 
 - Enter an 11-digit FNR on Home or Search. Guests enter the verification code shown by the official FOIS public enquiry form.
 - Enter station codes such as **RMN CFS** or select stations from the autocomplete list. Use **Find stations on FOIS** for a name or code outside the local list. Station-pair enquiries open ECBS sign-in and resume the query when login succeeds. The consignor filter defaults to **FCI**, as in the original script, and is editable.

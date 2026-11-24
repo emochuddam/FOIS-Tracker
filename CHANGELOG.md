@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- Simplified the app theme to standard Material 3 components and removed the Liquid Glass dependency.
+- Added one-second foreground refresh with inline status for open authenticated results.
+
 ## 1.0.1
 
 - Show the FNR in the result header and expand freight details by default.

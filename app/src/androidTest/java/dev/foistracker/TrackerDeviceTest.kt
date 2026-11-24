@@ -41,6 +41,19 @@ class TrackerDeviceTest {
         compose.onNodeWithText("Collapse").assertIsDisplayed()
     }
 
+    @Test fun unavailableAutomaticRefreshStaysInline() {
+        val query = Query("01234567890")
+        compose.runOnIdle {
+            val app = compose.activity
+            app.page = ResultPage(query, listOf(Freight(mapOf("FNR" to query.key))), true)
+            app.refresh(query, automatic = true)
+            assertNull(app.challenge)
+            assertNull(app.message)
+            assertTrue(app.refreshIssue?.second.orEmpty().startsWith("Live refresh paused"))
+        }
+        compose.onNodeWithText("Live refresh paused", substring = true).assertIsDisplayed()
+    }
+
     @Test fun persistsSavedAndCachedFreightAndDeduplicatesAlerts() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val key = "01234567891"

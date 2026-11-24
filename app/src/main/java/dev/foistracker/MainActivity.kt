@@ -42,6 +42,10 @@ class MainActivity : FragmentActivity() {
     internal var page by mutableStateOf<ResultPage?>(null)
     internal var challenge by mutableStateOf<Challenge?>(null)
     internal var loading by mutableStateOf(false)
+    internal var automaticRefresh by mutableStateOf(false)
+        private set
+    internal var refreshIssue by mutableStateOf<Pair<Query, String>?>(null)
+        private set
     internal var message by mutableStateOf<String?>(null)
     internal var locked by mutableStateOf(false)
     internal var biometricEnabled by mutableStateOf(false)
@@ -98,7 +102,7 @@ class MainActivity : FragmentActivity() {
         }
         setContent {
             BackHandler(page != null || challenge != null) {
-                if (!loading) {
+                if (!loading || automaticRefresh) {
                     if (challenge != null) closeChallenge() else page = null
                 }
             }
@@ -239,6 +243,7 @@ class MainActivity : FragmentActivity() {
 
     internal fun open(query: Query, cachedOnly: Boolean = false) {
         if (loading) return
+        refreshIssue = null
         val cached = history.find { it.key == query.storageKey }?.freight.orEmpty()
         if (cached.isNotEmpty()) page = ResultPage(query, cached, true)
         if (cachedOnly && cached.isNotEmpty()) return
@@ -247,20 +252,25 @@ class MainActivity : FragmentActivity() {
         else beginChallenge(query.isFnr, query)
     }
 
-    internal fun refresh(query: Query) {
-        if (loading) return
-        message = null
+    internal fun refresh(query: Query, automatic: Boolean = false) {
+        if (loading || automatic && (page?.query != query || !foreground || locked || challenge != null)) return
+        if (!automatic) {
+            message = null
+            refreshIssue = null
+        }
         if (!canReachInternet()) {
             page = page?.copy(cached = true)
-            message = if (page == null) "No internet connection. Connect and retry the search."
+            if (automatic) refreshIssue = query to "Live refresh paused · offline"
+            else message = if (page == null) "No internet connection. Connect and retry the search."
                 else "Offline. Showing the last retrieved freight result."
             return
         }
         if (!services.signedIn.value) {
-            beginChallenge(query.isFnr, query)
+            if (automatic) refreshIssue = query to "Live refresh paused · sign-in required"
+            else beginChallenge(query.isFnr, query)
             return
         }
-        execute {
+        execute(quietQuery = query.takeIf { automatic }) {
             try {
                 val result = services.networkLock.withLock {
                     try {
@@ -274,8 +284,16 @@ class MainActivity : FragmentActivity() {
                         throw e
                     }
                 }
-                show(query, result)
+                withContext(Dispatchers.Main) {
+                    if (!automatic || page?.query == query) show(query, result)
+                }
             } catch (_: FoisError.Authentication) {
+                if (automatic) {
+                    withContext(Dispatchers.Main) {
+                        if (page?.query == query) refreshIssue = query to "Live refresh paused · sign-in required"
+                    }
+                    return@execute
+                }
                 withContext(Dispatchers.Main) {
                     message = "Your ECBS session ended. Sign in again to continue."
                     initializeChallenge(false, query)
@@ -477,14 +495,17 @@ class MainActivity : FragmentActivity() {
             ?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
     }
 
-    private fun execute(task: suspend () -> Unit) {
+    private fun execute(quietQuery: Query? = null, task: suspend () -> Unit) {
         if (loading) return
+        automaticRefresh = quietQuery != null
         loading = true
         lifecycleScope.launch {
             try { withContext(Dispatchers.IO) { task() } }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                message = when (e) {
+                if (quietQuery != null) {
+                    if (page?.query == quietQuery) refreshIssue = quietQuery to "Live refresh paused · tap Refresh to retry"
+                } else message = when (e) {
                     is FoisError -> e.message
                     is SocketTimeoutException -> "FOIS timed out. Try again."
                     is UnknownHostException -> "FOIS could not be reached. Check your internet connection."
@@ -492,7 +513,10 @@ class MainActivity : FragmentActivity() {
                     is IOException -> "The operation could not finish. Check your connection and try again."
                     else -> "The operation could not finish. Try again."
                 }
-            } finally { loading = false }
+            } finally {
+                loading = false
+                automaticRefresh = false
+            }
         }
     }
 }
