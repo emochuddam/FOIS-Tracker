@@ -22,6 +22,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.*
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -86,13 +87,19 @@ class MainActivity : FragmentActivity() {
         interval = services.settings.getLong("interval", 15)
         biometricEnabled = services.settings.getBoolean("biometric", false)
         locked = biometricEnabled
-        pendingKey = intent.getStringExtra("enquiry")
+        pendingKey = intent.getStringExtra("enquiry") ?: services.liveTracking.value?.query?.storageKey
         lifecycleScope.launch {
             withContext(Dispatchers.IO) { migrateLegacy() }
             services.store.changes.collect {
                 val (list, entries) = withContext(Dispatchers.IO) { services.store.saved() to services.store.history() }
                 saved = list
                 history = entries
+                val current = page
+                val latest = current?.let { result -> entries.firstOrNull { it.key == result.query.storageKey } }
+                if (current != null && latest != null &&
+                    latest.updated > (current.freight.maxOfOrNull(Freight::retrieved) ?: 0)) {
+                    show(current.query, latest.freight)
+                }
                 if (!locked) openPending()
             }
         }
@@ -253,7 +260,8 @@ class MainActivity : FragmentActivity() {
     }
 
     internal fun refresh(query: Query, automatic: Boolean = false, notifyOnRefresh: Boolean = false) {
-        if (loading || automatic && (page?.query != query || !foreground || locked || challenge != null)) return
+        if (loading || automatic && (page?.query != query || !foreground || locked || challenge != null ||
+                services.liveTracking.value?.query == query)) return
         if (!automatic) {
             message = null
             refreshIssue = null
@@ -430,7 +438,29 @@ class MainActivity : FragmentActivity() {
         page = ResultPage(query, result, false, index.coerceAtLeast(0))
     }
 
+    internal fun startBackgroundLive(query: Query) {
+        if (!foreground || !services.signedIn.value) return
+        if (!notificationsAllowed) {
+            enableNotifications()
+            message = "Allow notifications, then tap Keep live in background again."
+            return
+        }
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, LiveTrackingService::class.java)
+                .putExtra(LiveTrackingService.QUERY, query.storageKey))
+        } catch (_: IllegalStateException) {
+            message = "Android could not start background Live tracking. Try again while the app is open."
+        } catch (_: SecurityException) {
+            message = "Android blocked background Live tracking."
+        }
+    }
+
+    internal fun stopBackgroundLive() {
+        stopService(Intent(this, LiveTrackingService::class.java))
+    }
+
     internal fun logout() {
+        stopBackgroundLive()
         execute {
             services.networkLock.withLock {
                 try { services.client.signOut() }

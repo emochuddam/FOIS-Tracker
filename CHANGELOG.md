@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5
+
+- Added a Live label beside the green indicator.
+- Added user-started background Live tracking, with an ongoing notification and Stop action.
+- Show the latest stored result when returning to the app.
+
 ## 1.0.4
 
 - Added route summaries to freight results and saved freight cards.

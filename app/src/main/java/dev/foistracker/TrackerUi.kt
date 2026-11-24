@@ -659,9 +659,11 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
         else -> "$distance km"
     }
     val signedIn by app.services.signedIn.collectAsState()
+    val liveTracking by app.services.liveTracking.collectAsState()
+    val backgroundLive = liveTracking?.takeIf { it.query == page.query }
     val active = signedIn && app.foreground && !app.locked && app.challenge == null && freight.arrived == null
     val refreshIssue = app.refreshIssue?.takeIf { it.first == page.query }?.second
-    val polling = active && refreshIssue == null && app.message == null && !app.loading
+    val polling = active && backgroundLive == null && refreshIssue == null && app.message == null && !app.loading
     var elapsed by remember(freight.retrieved) { mutableLongStateOf(0) }
     LaunchedEffect(freight.retrieved, app.foreground, page.cached) {
         while (app.foreground && !page.cached) {
@@ -729,10 +731,19 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                             color = if (remaining > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
                     }
                     Text("${if (page.cached) "Cached result · " else ""}${freight.source}", style = MaterialTheme.typography.labelLarge)
-                    if (polling || app.automaticRefresh) {
-                        LiveRefreshLight()
+                    if (backgroundLive?.paused == false || polling || app.automaticRefresh) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LiveRefreshLight()
+                            Text("Live", style = MaterialTheme.typography.labelLarge)
+                        }
                     } else {
-                        refreshIssue?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
+                        (backgroundLive?.takeIf { it.paused }?.let { "Background Live is waiting to retry." } ?: refreshIssue)
+                            ?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
+                    }
+                    if (signedIn && freight.arrived == null) {
+                        TextButton(onClick = {
+                            if (backgroundLive != null) app.stopBackgroundLive() else app.startBackgroundLive(page.query)
+                        }) { Text(if (backgroundLive != null) "Stop background live" else "Keep live in background") }
                     }
                     if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
                     Text("Last successful update · ${displayTime(freight.retrieved)}", style = MaterialTheme.typography.bodySmall)

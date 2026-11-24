@@ -186,6 +186,7 @@ class Services private constructor(context: Context) {
         val json = JSONArray(vault.get("session") ?: "[]")
         (0 until json.length()).mapNotNull { Cookie.parse(root, json.getString(it)) }
     }.getOrDefault(emptyList()))
+    val liveTracking = MutableStateFlow<LiveTrackingState?>(null)
     val signedIn = MutableStateFlow(cookies.all().isNotEmpty())
     val client = FoisClient(cookies)
     val networkLock = Mutex()

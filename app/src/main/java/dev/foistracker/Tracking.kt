@@ -104,6 +104,7 @@ class FreightWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         var retry = false
         for (item in items) {
             services.networkLock.withLock {
+                if (services.liveTracking.value?.query?.storageKey == item.key) return@withLock
                 if (!services.store.saved().any { it.key == item.key && it.tracking }) return@withLock
                 if (!services.signedIn.value) {
                     Tracking.notify(applicationContext, services, item.key, Alert.AUTH, "Sign in to continue background tracking.")
