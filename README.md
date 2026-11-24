@@ -1,10 +1,12 @@
 # FOIS Tracker
 
+![FOIS Tracker railway project banner](docs/fois-tracker-banner.png)
+
 FOIS Tracker is an independent native Android client for Indian Railways freight enquiries. Indian Railways does not operate or endorse this app.
 
 ## Install
 
-Download the **FOIS-Tracker-APK** artifact from the latest successful **Build FOIS APK** run. Extract `FOIS-Tracker.apk` and install it on Android 8.0 or later. The APK supports ARM64 and targets Android 16.
+[Download FOIS-Tracker.apk](https://github.com/emochuddam/FOIS-Tracker/releases/download/v1.0.0-debug/FOIS-Tracker.apk) from the [GitHub prerelease](https://github.com/emochuddam/FOIS-Tracker/releases/tag/v1.0.0-debug). The APK runs on Android 8.0 and later, supports ARM64, and targets Android 16. A [SHA-256 checksum](https://github.com/emochuddam/FOIS-Tracker/releases/download/v1.0.0-debug/FOIS-Tracker.apk.sha256) is available alongside it.
 
 Debug builds are signed for testing. Android requires the same signing certificate for an in-place update. A build signed on another runner or with another key may require a clean installation. The app retains the existing application ID and imports previous saved FNRs and the last cached public result when installed as an in-place update.
 
