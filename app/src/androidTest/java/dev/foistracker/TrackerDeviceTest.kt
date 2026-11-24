@@ -4,25 +4,41 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
+import androidx.test.rule.GrantPermissionRule
 import org.junit.Rule
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 
 class TrackerDeviceTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @get:Rule(order = 0)
+    val notificationPermission: org.junit.rules.TestRule =
+        if (android.os.Build.VERSION.SDK_INT >= 33) GrantPermissionRule.grant(android.Manifest.permission.POST_NOTIFICATIONS)
+        else org.junit.rules.TestRule { statement, _ -> statement }
+    @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun validatesInvalidFNRAndProvidesThemeSettings() {
+    @Test fun validatesFromHomeAndSearch() {
         compose.onNodeWithText("FNR or station pair").performTextInput("123")
         compose.onNodeWithText("Search freight").performClick()
         compose.onNodeWithText("Enter an 11-digit FNR or two different station codes, such as RMN CFS.").assertIsDisplayed()
-        compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithText("AMOLED").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals("AMOLED", compose.activity.theme) }
-        compose.onNodeWithText("System").performClick()
+        compose.onNodeWithText("Search").performClick()
+        compose.onNodeWithText("Search freight").performClick()
+        compose.onNodeWithText("Enter an 11-digit FNR or two different station codes, such as RMN CFS.").assertIsDisplayed()
+    }
+
+    @Test fun displaysFreightNumberAndOpensDetailsByDefault() {
+        val fnr = "01234567890"
+        compose.runOnIdle {
+            compose.activity.page = ResultPage(Query(fnr), listOf(Freight(mapOf("FNR" to fnr))), true)
+        }
+        compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
+        compose.onNodeWithText("Collapse").assertIsDisplayed()
     }
 
     @Test fun persistsSavedAndCachedFreightAndDeduplicatesAlerts() {

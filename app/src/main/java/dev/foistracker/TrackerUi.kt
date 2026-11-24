@@ -31,6 +31,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -51,6 +53,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Duration
@@ -80,12 +83,8 @@ private val stations = listOf("RMN" to "Raman", "NDLS" to "New Delhi", "DLI" to 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackerApp(app: MainActivity) {
-    val systemDark = isSystemInDarkTheme()
-    val darkMode = app.theme in listOf("Dark", "AMOLED") || app.theme == "System" && systemDark
-    val colors = when (app.theme) {
-        "AMOLED" -> dark.copy(background = Color.Black, surface = Color(0xFF101516))
-        else -> if (darkMode) dark else light
-    }
+    val darkMode = isSystemInDarkTheme()
+    val colors = if (darkMode) dark else light
     SideEffect {
         val bars = WindowCompat.getInsetsController(app.window, app.window.decorView)
         bars.isAppearanceLightStatusBars = !darkMode
@@ -109,7 +108,7 @@ fun TrackerApp(app: MainActivity) {
                 }
             }
             CompositionLocalProvider(LocalBackdrop provides backdrop.takeIf {
-                android.os.Build.VERSION.SDK_INT >= 33 && app.theme != "AMOLED"
+                android.os.Build.VERSION.SDK_INT >= 33
             }) {
                 Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
                     .align(Alignment.TopCenter)) {
@@ -306,9 +305,12 @@ private fun Home(app: MainActivity, signedIn: Boolean) {
 
 @Composable
 private fun Search(app: MainActivity, signedIn: Boolean) {
-    var route by remember { mutableStateOf(app.queryText.contains(' ')) }
-    var origin by remember { mutableStateOf(app.queryText.substringBefore(' ').takeIf { route }.orEmpty()) }
-    var dest by remember { mutableStateOf(app.queryText.substringAfter(' ', "").takeIf { route }.orEmpty()) }
+    val initialRoute = remember { Query.parse(app.queryText)?.takeUnless(Query::isFnr) }
+    var route by remember { mutableStateOf(initialRoute != null) }
+    var origin by remember { mutableStateOf(initialRoute?.key?.substringBefore(' ').orEmpty()) }
+    var dest by remember { mutableStateOf(initialRoute?.key?.substringAfter(' ').orEmpty()) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val learned = app.history.asSequence().flatMap { it.freight.asSequence() }
         .flatMap { sequenceOf(it.values["Origin"], it.values["Destination"]) }.filterNotNull()
         .mapNotNull { station -> Regex("""(.+?)\s*\(([A-Z0-9]{2,5})\)""").matchEntire(station)?.let { it.groupValues[2] to it.groupValues[1] } }
@@ -335,14 +337,18 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                         }) { Text("Paste route") }
                         TextButton(onClick = { origin = ""; dest = "" }) { Text("Clear") }
                     }
-                } else SearchInput(app, "11-digit FNR")
+                } else SearchInput(app)
                 GlassButton("Search freight", !app.loading) {
+                    focus.clearFocus()
+                    keyboard?.hide()
                     if (route) {
-                        val parsed = Query.parse("$origin $dest", app.consignor)
+                        val stationList = stations + learned
+                        fun code(text: String) = stationList.firstOrNull { it.second.equals(text.trim(), true) }
+                            ?.first ?: text.trim()
+                        val parsed = Query.parse("${code(origin)} ${code(dest)}", app.consignor)
                         if (parsed == null || parsed.isFnr) app.message = "Select two station codes or enter them directly."
                         else { app.queryText = parsed.key; app.open(parsed) }
-                    } else if (Query.parse(app.queryText)?.isFnr == true) app.search()
-                    else app.message = "Enter an 11-digit FNR."
+                    } else app.search()
                 }
             }
         }
@@ -360,13 +366,16 @@ private fun LazyListScope.recent(app: MainActivity) {
 }
 
 @Composable
-private fun SearchInput(app: MainActivity, label: String = "FNR or station pair") {
+private fun SearchInput(app: MainActivity) {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     OutlinedTextField(app.queryText, { app.queryText = it.take(90) }, Modifier.fillMaxWidth(),
-        label = { Text(label) }, placeholder = { Text(if (label == "11-digit FNR") "11 digits" else "11 digits or RMN CFS") },
+        label = { Text("FNR or station pair") }, placeholder = { Text("11 digits or RMN CFS") },
         singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         keyboardActions = KeyboardActions(onSearch = {
-            if (label == "11-digit FNR" && Query.parse(app.queryText)?.isFnr != true) app.message = "Enter an 11-digit FNR."
-            else app.search()
+            focus.clearFocus()
+            keyboard?.hide()
+            app.search()
         }), trailingIcon = {
             if (app.queryText.isNotEmpty()) IconButton(onClick = { app.queryText = "" }) { Icon(Icons.Default.Clear, "Clear search") }
         })
@@ -620,16 +629,6 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
         }
         item {
             Panel {
-                Label("APPEARANCE")
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("System", "Light", "Dark", "AMOLED").forEach { mode ->
-                        FilterChip(app.theme == mode, { app.changeTheme(mode) }, { Text(mode) })
-                    }
-                }
-            }
-        }
-        item {
-            Panel {
                 Label("BACKGROUND REFRESH")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(15L, 30L, 60L, 120L).forEach { min ->
@@ -642,6 +641,7 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
         item {
             Panel {
                 Label("NOTIFICATIONS")
+                if (!app.notificationsAllowed) TextButton(onClick = app::enableNotifications) { Text("Enable notifications") }
                 Text("Set sound and vibration for each channel in Android.")
                 Alert.entries.forEach { alert ->
                     val key = "alert_${alert.name}"
@@ -675,6 +675,24 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
 @Composable
 private fun FreightUi(app: MainActivity, page: ResultPage) {
     val freight = page.freight.getOrNull(page.selected) ?: return
+    val signedIn by app.services.signedIn.collectAsState()
+    val active = signedIn && app.foreground && !app.locked && app.challenge == null && freight.arrived == null
+    val polling = active && app.message == null && !app.loading
+    var elapsed by remember(freight.retrieved) { mutableLongStateOf(0) }
+    LaunchedEffect(freight.retrieved, app.foreground, page.cached) {
+        while (app.foreground && !page.cached) {
+            elapsed = ((System.currentTimeMillis() - freight.retrieved) / 1000).coerceAtLeast(0)
+            if (elapsed >= 60) break
+            delay(1000)
+        }
+    }
+    LaunchedEffect(page.query.storageKey, polling) {
+        if (polling) {
+            // Start the next interval after the previous request finishes.
+            delay(30_000)
+            app.refresh(page.query)
+        }
+    }
     var stationFilter by remember(page.query.storageKey, page.selected) { mutableStateOf("") }
     var newest by remember(page.query.storageKey, page.selected) { mutableStateOf(false) }
     var expanded by remember(page.query.storageKey, page.selected) { mutableStateOf(setOf<Journey>()) }
@@ -701,6 +719,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
         Feed {
             item {
                 Panel {
+                    Label("FNR · ${freight.fnr.ifBlank { page.query.key.takeIf { page.query.isFnr } ?: "Not Reported" }}")
                     Label(if (freight.arrived == null) "ESTIMATED ARRIVAL" else "CONFIRMED ARRIVAL")
                     Text(displayFreightTime(freight.arrived ?: freight.eta), fontSize = 40.sp,
                         lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -724,6 +743,16 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                             color = if (remaining > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
                     }
                     Text("${if (page.cached) "Cached result · " else ""}${freight.source}", style = MaterialTheme.typography.labelLarge)
+                    val liveStatus = when {
+                        app.loading -> "Refreshing from FOIS"
+                        polling -> "Live refresh · checks every 30 seconds"
+                        !signedIn && freight.arrived == null -> "Manual refresh · verification may be required"
+                        active -> "Live refresh paused"
+                        else -> "Showing last reported data"
+                    }
+                    Text(liveStatus, color = if (polling) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.labelLarge)
+                    if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
                     Text("Last successful update · ${displayTime(freight.retrieved)}", style = MaterialTheme.typography.bodySmall)
                     if (page.freight.size > 1) {
                         Label("${page.freight.size} MATCHING CONSIGNMENTS")
@@ -750,7 +779,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                 }
             }
             item {
-                var details by remember { mutableStateOf(false) }
+                var details by remember(page.query.storageKey, page.selected) { mutableStateOf(true) }
                 Panel {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Freight details", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

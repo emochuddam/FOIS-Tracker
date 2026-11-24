@@ -105,6 +105,19 @@ class FoisTest {
         assertEquals("24-11-2026 18:45", result.eta)
     }
 
+    @Test fun recognizesExplicitFreightNumbersAndPreservesLeadingZeroes() {
+        val html = "<table><tr><td>FNR No. :</td><td>01234567890</td></tr></table>"
+        assertEquals("01234567890", FreightParser.reportedFnr(html))
+        assertEquals(null, FreightParser.reportedFnr("<p>Railway receipt 01234567890</p>"))
+        val routes = FreightParser.route("""
+            <table><tr><th>STTN FROM</th><th>STTN TO</th><th>LOAD TYPE</th><th>Freight Number (FNR)</th></tr>
+            <tr><td>RMN</td><td>CFS</td><td>BOX</td><td>01234567890</td></tr>
+            <tr><td>RMN</td><td>CFS</td><td>BOX</td><td>1234</td></tr></table>
+        """)
+        assertEquals("01234567890", routes.first().freight.fnr)
+        assertEquals("", routes.last().freight.fnr)
+    }
+
     @Test fun stationRouteUsesAuthorizedInsightAndReturnsAllRows() = MockWebServer().use { server ->
         server.enqueue(MockResponse().setBody("""
             <table><tr><th>STTN FROM</th><th>STTN TO</th><th>LOAD TYPE</th><th>LOAD NAME</th><th>EXPD ARVLTIME</th></tr>

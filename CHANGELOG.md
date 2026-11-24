@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Show the FNR in the result header and expand freight details by default.
+- Accept FNRs and station pairs from the Search tab and show the verification screen immediately for guests.
+- Request notification permission on Android 13 and later and add a shortcut in Settings.
+- Follow the device theme and refresh open authenticated results every 30 seconds.
+
 ## 1.0.0
 
 - Rebuilt the native Android client in Kotlin and Jetpack Compose, preserving the app ID and public FNR form.

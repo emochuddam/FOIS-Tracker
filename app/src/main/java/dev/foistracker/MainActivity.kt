@@ -1,6 +1,8 @@
 package dev.foistracker
 
 import android.Manifest
+import android.app.NotificationManager
+import android.content.pm.PackageManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -45,7 +47,10 @@ class MainActivity : FragmentActivity() {
     internal var biometricEnabled by mutableStateOf(false)
     internal var queryText by mutableStateOf("")
     internal var consignor by mutableStateOf("FCI")
-    internal var theme by mutableStateOf("System")
+    internal var foreground by mutableStateOf(false)
+        private set
+    internal var notificationsAllowed by mutableStateOf(false)
+        private set
     internal var interval by mutableLongStateOf(15)
     internal var remembered by mutableStateOf("")
     internal var storedPassword by mutableStateOf("")
@@ -55,7 +60,7 @@ class MainActivity : FragmentActivity() {
     private var pendingKey: String? = null
     private var prompting = false
     private var wentToBackground = false
-    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updateNotificationState() }
     private val saveReport = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = report
         report = null
@@ -74,7 +79,6 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        theme = services.settings.getString("theme", "System") ?: "System"
         interval = services.settings.getLong("interval", 15)
         biometricEnabled = services.settings.getBoolean("biometric", false)
         locked = biometricEnabled
@@ -188,9 +192,36 @@ class MainActivity : FragmentActivity() {
         services.settings.edit().putBoolean("biometric", false).apply()
     }
 
-    internal fun changeTheme(value: String) {
-        theme = value
-        services.settings.edit().putString("theme", value).apply()
+    private fun updateNotificationState() {
+        notificationsAllowed = getSystemService(NotificationManager::class.java).areNotificationsEnabled()
+    }
+
+    internal fun enableNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            (!services.settings.getBoolean("notification_prompt_shown", false) ||
+                shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+            services.settings.edit().putBoolean("notification_prompt_shown", true).apply()
+            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!notificationsAllowed) {
+            startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        foreground = true
+        updateNotificationState()
+        if (!locked && Build.VERSION.SDK_INT >= 33 && !notificationsAllowed &&
+            !services.settings.getBoolean("notification_prompt_shown", false)) {
+            enableNotifications()
+        }
+    }
+
+    override fun onPause() {
+        foreground = false
+        super.onPause()
     }
 
     internal fun changeInterval(value: Long) {
@@ -212,11 +243,6 @@ class MainActivity : FragmentActivity() {
         if (cached.isNotEmpty()) page = ResultPage(query, cached, true)
         if (cachedOnly && cached.isNotEmpty()) return
         message = null
-        if (!canReachInternet()) {
-            message = if (cached.isEmpty()) "No internet connection. Connect to the internet and retry."
-                else "Offline. Showing the last retrieved freight result."
-            return
-        }
         if (services.signedIn.value) refresh(query)
         else beginChallenge(query.isFnr, query)
     }
@@ -226,7 +252,8 @@ class MainActivity : FragmentActivity() {
         message = null
         if (!canReachInternet()) {
             page = page?.copy(cached = true)
-            message = "Offline. Check your connection before refreshing."
+            message = if (page == null) "No internet connection. Connect and retry the search."
+                else "Offline. Showing the last retrieved freight result."
             return
         }
         if (!services.signedIn.value) {
@@ -389,7 +416,7 @@ class MainActivity : FragmentActivity() {
     }
 
     internal fun save(item: Saved) {
-        if (item.tracking && Build.VERSION.SDK_INT >= 33) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (item.tracking && !notificationsAllowed) enableNotifications()
         lifecycleScope.launch(Dispatchers.IO) {
             services.store.save(item)
             Tracking.sync(this@MainActivity, services)

@@ -61,7 +61,8 @@ sealed class FoisError(message: String) : IOException(message) {
 }
 
 private val aliases = mapOf(
-    "fnr" to "FNR", "fnr number" to "FNR", "rr number" to "Railway receipt", "rr no" to "Railway receipt",
+    "fnr" to "FNR", "fnr number" to "FNR", "fnr no" to "FNR", "f.n.r. no" to "FNR",
+    "freight number" to "FNR", "freight number (fnr)" to "FNR", "rr number" to "Railway receipt", "rr no" to "Railway receipt",
     "railway receipt number" to "Railway receipt", "sttn from" to "Origin", "station from" to "Origin",
     "sttn to" to "Destination", "station to" to "Destination", "source station" to "Origin",
     "destination station" to "Destination", "load name" to "Rake identification", "rake id" to "Rake identification",
@@ -75,7 +76,7 @@ private val aliases = mapOf(
 ) + fields.associateBy { it.lowercase(Locale.ROOT) }
 
 object FreightParser {
-    private fun normalized(text: String) = text.trim().trimEnd(':').lowercase(Locale.ROOT)
+    private fun normalized(text: String) = text.trimEnd { it.isWhitespace() || it == ':' || it == '.' }.trimStart().lowercase(Locale.ROOT)
     fun clean(text: String) = text.trim().takeUnless { it.isBlank() || it.uppercase() in setOf("N/A", "NA", "-", "--", "NOT REPORTED") }
     fun cells(row: Element) = row.children().filter { it.tagName() in setOf("td", "th") }
     private fun key(text: String) = aliases[normalized(text)]
@@ -184,7 +185,9 @@ object FreightParser {
                     val values = headers.zip(cells).mapNotNull { (label, cell) ->
                         val name = key(label)
                         val value = clean(cell.text())
-                        if (name != null && value != null) name to value else null
+                        if (name != null && value != null && (name != "FNR" || value.matches(Regex("[0-9]{11}")))) {
+                            name to value
+                        } else null
                     }.toMap()
                     if (values["Origin"] != null && values["Destination"] != null) {
                         val markup = row.outerHtml().replace("&amp;", "&")
@@ -437,6 +440,10 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
         }
         val html = request(url.toString(), referer = router).decodeToString()
         val receipts = FreightParser.receipts(html)
+        if (receipts.isEmpty()) {
+            val number = FreightParser.reportedFnr(html) ?: return listOf(row.freight)
+            return listOf(row.freight.copy(values = row.freight.values + ("FNR" to number)))
+        }
         return receipts.map { receipt ->
             val args = mapOf("txtSttnFrom" to receipt.origin, "txtSttnTo" to receipt.destination,
                 "txtInvcNo" to receipt.index, "txtDate" to receipt.date, "flag" to "frgt",
@@ -444,9 +451,12 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
             val values = row.freight.values.toMutableMap()
             receipt.reportedNumber?.let { values["Railway receipt"] = it }
             try {
-                val details = request(router, form = args, referer = url.toString()).decodeToString()
-                val number = FreightParser.reportedFnr(details)
-                    ?: FreightParser.reportedFnr(request(router, query = args, referer = url.toString()).decodeToString())
+                var details = request(router, form = args, referer = url.toString()).decodeToString()
+                var number = FreightParser.reportedFnr(details)
+                if (number == null) {
+                    details = request(router, query = args, referer = url.toString()).decodeToString()
+                    number = FreightParser.reportedFnr(details)
+                }
                 if (number != null) values["FNR"] = number
                 val parsed = number?.let { runCatching { FreightParser.details(details, it) }.getOrNull() }
                 row.freight.copy(values = values + parsed?.values.orEmpty(), journey = parsed?.journey.orEmpty())

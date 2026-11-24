@@ -18,8 +18,8 @@ android {
         applicationId = "org.railtracker.fois"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     if (hasReleaseSigning) {
@@ -57,5 +57,6 @@ dependencies {
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.03.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
