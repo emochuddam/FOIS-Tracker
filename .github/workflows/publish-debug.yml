@@ -1,0 +1,50 @@
+name: Publish verified debug prerelease
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Build FOIS APK run ID
+        required: true
+      version:
+        description: App version, such as 1.0.0
+        required: true
+      sha256:
+        description: Expected SHA-256 of the APK
+        required: true
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify build and download APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          VERSION: ${{ inputs.version }}
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          commit="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq 'select(.conclusion == "success" and .head_branch == "main" and .path == ".github/workflows/build.yml" and .head_repository.full_name == .repository.full_name) | .head_sha')"
+          [[ "$commit" =~ ^[a-f0-9]{40}$ ]]
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name FOIS-Tracker-APK --dir dist
+          (cd dist && printf '%s  FOIS-Tracker.apk\n' "$EXPECTED_SHA256" > FOIS-Tracker.apk.sha256 && sha256sum -c FOIS-Tracker.apk.sha256)
+          printf 'BUILD_COMMIT=%s\n' "$commit" >> "$GITHUB_ENV"
+      - name: Publish debug prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}-debug"
+          {
+            printf 'Installable debug build of FOIS Tracker %s for Android 8.0 and later.\n\n' "$VERSION"
+            printf 'Live authenticated FOIS enquiries require verification with an authorized account.\n\n'
+            printf '[Build and test results](https://github.com/%s/actions/runs/%s)\n' "$GITHUB_REPOSITORY" "$RUN_ID"
+          } > release-notes.md
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$BUILD_COMMIT" \
+            --prerelease --title "FOIS Tracker $VERSION (Debug)" --notes-file release-notes.md \
+            dist/FOIS-Tracker.apk dist/FOIS-Tracker.apk.sha256
