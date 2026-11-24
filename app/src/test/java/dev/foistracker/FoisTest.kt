@@ -182,6 +182,15 @@ class FoisTest {
         assertEquals("Qry=CRT_LOCN&txtSttnCode=&txtSttnName=ALPHA&hidreset=A", post.body.readUtf8())
     }
 
+    @Test fun notificationShowsEtaAndDistinguishesConfirmedArrival() {
+        val estimate = Freight(mapOf("FNR" to "01234567890", "Expected arrival" to "24-11-2026 12:00"))
+        val completed = Freight(mapOf("FNR" to "01234567891", "Actual arrival" to "24-11-2026 10:30"))
+        assertEquals("Estimated arrival · 24 Nov 2026, 12:00 IST", notificationArrivals(listOf(estimate)))
+        assertEquals("Arrived · 24 Nov 2026, 10:30 IST", notificationArrival(completed))
+        assertEquals("Estimated arrival · Not Reported", notificationArrivals(emptyList()))
+        assertTrue(notificationArrivals(listOf(estimate, completed)).contains("01234567891 · Arrived"))
+    }
+
     @Test fun freightAlertsUseReportedChangesAndIndianTime() {
         val a = Freight(mapOf("Expected arrival" to "24-11-2026 12:00", "Last reported station" to "AAA"))
         val b = Freight(mapOf("Expected arrival" to "24-11-2026 14:30", "Last reported station" to "BBB",

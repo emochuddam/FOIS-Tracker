@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6
+
+- Smoothed screen changes, button presses, and freight detail expansion.
+- Display reported remaining distance in red.
+- Include estimated arrival in refresh, freight-change, and background Live notifications.
+
 ## 1.0.5
 
 - Added a Live label beside the green indicator.

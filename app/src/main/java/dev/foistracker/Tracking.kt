@@ -44,6 +44,18 @@ fun freightAlerts(old: Freight?, next: Freight): List<Pair<Alert, String>> = bui
     if (status != null && status != old.values["Freight status"]) add(Alert.STATUS to status)
 }
 
+internal fun notificationArrival(freight: Freight): String = when {
+    freight.arrived != null -> "Arrived · ${displayFreightTime(freight.arrived)}"
+    else -> "Estimated arrival · ${displayFreightTime(freight.eta)}"
+}
+
+internal fun notificationArrivals(freight: List<Freight>): String {
+    if (freight.size <= 1) return freight.firstOrNull()?.let(::notificationArrival) ?: "Estimated arrival · Not Reported"
+    return freight.take(3).mapIndexed { index, row ->
+        "${row.fnr.ifBlank { "Consignment ${index + 1}" }} · ${notificationArrival(row)}"
+    }.plus(listOfNotNull("Open app for all ${freight.size} consignments".takeIf { freight.size > 3 })).joinToString("\n")
+}
+
 object Tracking {
     fun schedule(context: Context, minutes: Long) {
         val request = PeriodicWorkRequestBuilder<FreightWorker>(minutes.coerceAtLeast(15), TimeUnit.MINUTES)
@@ -72,7 +84,8 @@ object Tracking {
                 if (row.fnr.isNotEmpty()) it.fnr == row.fnr else rake != null && it.values["Rake identification"] == rake
             } ?: continue
             freightAlerts(old, row).forEach { (alert, text) ->
-                notify(context, services, key, alert, text, "${row.fnr.ifEmpty { rake.orEmpty() }}|${old.retrieved}|$text")
+                notify(context, services, key, alert, "$text\n${notificationArrival(row)}",
+                    "${row.fnr.ifEmpty { rake.orEmpty() }}|${old.retrieved}|$text")
             }
         }
     }
@@ -89,8 +102,8 @@ object Tracking {
         val intent = Intent(context, MainActivity::class.java).putExtra("enquiry", key).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(id, NotificationCompat.Builder(context, channel)
-            .setSmallIcon(R.drawable.ic_rail).setContentTitle(alert.label).setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$key • $text")).setContentIntent(pending).setAutoCancel(true).build())
+            .setSmallIcon(R.drawable.ic_rail).setContentTitle(alert.label).setContentText(text.lineSequence().first())
+            .setSubText(Query.fromStorage(key).key).setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(pending).setAutoCancel(true).build())
     }
 }
 

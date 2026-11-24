@@ -1,6 +1,15 @@
 package dev.foistracker
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
@@ -127,19 +136,31 @@ fun TrackerApp(app: MainActivity) {
                         }
                     }
                     if (app.loading && !app.automaticRefresh) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                    Box(Modifier.weight(1f)) {
-                        when {
-                            page != null -> FreightUi(app, page)
-                            challenge != null -> ChallengeUi(app, challenge)
-                            else -> AnimatedContent(app.tab, label = "Primary navigation") { tab ->
-                                when (tab) {
-                                    0 -> Home(app, signedIn)
-                                    1 -> Search(app, signedIn)
-                                    2 -> SavedScreen(app, signedIn)
-                                    3 -> History(app)
-                                    else -> Preferences(app, signedIn)
-                                }
+                    AnimatedContent(
+                        targetState = Triple(app.tab, page, challenge),
+                        modifier = Modifier.weight(1f),
+                        contentKey = { (tab, result, verification) ->
+                            when {
+                                result != null -> "result/${result.query.storageKey}"
+                                verification != null -> "verification"
+                                else -> "tab/$tab"
                             }
+                        },
+                        transitionSpec = {
+                            val direction = if (targetState.first < initialState.first) -1 else 1
+                            (fadeIn(tween(200)) + slideInHorizontally(tween(240)) { it * direction / 20 }) togetherWith
+                                (fadeOut(tween(130)) + slideOutHorizontally(tween(200)) { -it * direction / 24 })
+                        },
+                        label = "Tracker screens"
+                    ) { (tab, result, verification) ->
+                        when {
+                            result != null -> FreightUi(app, result)
+                            verification != null -> ChallengeUi(app, verification)
+                            tab == 0 -> Home(app, signedIn)
+                            tab == 1 -> Search(app, signedIn)
+                            tab == 2 -> SavedScreen(app, signedIn)
+                            tab == 3 -> History(app)
+                            else -> Preferences(app, signedIn)
                         }
                     }
                     if (challenge != null && page != null) {
@@ -183,8 +204,8 @@ private fun ActionButton(label: String, enabled: Boolean = true, action: () -> U
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        if (pressed && enabled) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 500f),
+        if (pressed && enabled) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
         label = "Button press"
     )
     Button(
@@ -459,8 +480,12 @@ private fun ChallengeUi(app: MainActivity, challenge: Challenge) {
 
 @Composable
 private fun EntryTile(title: String, subtitle: String, click: () -> Unit) {
-    Surface(onClick = click, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.98f else 1f, label = "Freight tile press")
+    Surface(onClick = click, interactionSource = interaction, shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }) {
         Row(Modifier.padding(horizontal = 17.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -653,6 +678,7 @@ private fun Preferences(app: MainActivity, signedIn: Boolean) {
 private fun FreightUi(app: MainActivity, page: ResultPage) {
     val freight = page.freight.getOrNull(page.selected) ?: return
     val distance = freight.values["Remaining distance"]
+    val distanceColor = if (distance != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     val distanceText = when {
         distance == null -> "Not Reported"
         distance.any(Char::isLetter) -> distance
@@ -707,10 +733,16 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                 Panel {
                     Label("FNR · ${freight.fnr.ifBlank { page.query.key.takeIf { page.query.isFnr } ?: "Not Reported" }}")
                     Label(if (freight.arrived == null) "ESTIMATED ARRIVAL" else "CONFIRMED ARRIVAL")
-                    Text(displayFreightTime(freight.arrived ?: freight.eta), fontSize = 40.sp,
-                        lineHeight = 44.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    AnimatedContent(
+                        targetState = displayFreightTime(freight.arrived ?: freight.eta),
+                        transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(110)) },
+                        label = "Arrival time"
+                    ) { arrival ->
+                        Text(arrival, fontSize = 40.sp, lineHeight = 44.sp,
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
                     Label("REMAINING DISTANCE")
-                    Text(distanceText, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold)
+                    Text(distanceText, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold, color = distanceColor)
                     if (freight.arrived != null && freight.eta != null) Text("Last ETA · ${displayFreightTime(freight.eta)}")
                     val previous = freightTime(freight.previousEta)
                     val current = freightTime(freight.eta)
@@ -742,7 +774,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                     }
                     if (signedIn && freight.arrived == null) {
                         TextButton(onClick = {
-                            if (backgroundLive != null) app.stopBackgroundLive() else app.startBackgroundLive(page.query)
+                            if (backgroundLive != null) app.stopBackgroundLive() else app.startBackgroundLive(page.query, page.freight)
                         }) { Text(if (backgroundLive != null) "Stop background live" else "Keep live in background") }
                     }
                     if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
@@ -777,16 +809,22 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         Text("Freight details", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         TextButton(onClick = { details = !details }) { Text(if (details) "Collapse" else "Expand") }
                     }
-                    if (details) (fields + (freight.values.keys - fields.toSet())).distinct().forEach { field ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Label(field)
-                                if (field == "Remaining distance") {
-                                    Text(distanceText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                } else Text(freight.get(field))
-                            }
-                            if (freight.values.containsKey(field)) IconButton(onClick = { app.copy(field, freight.get(field)) }) {
-                                Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
+                    AnimatedVisibility(visible = details,
+                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
+                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120))) {
+                        Column {
+                            (fields + (freight.values.keys - fields.toSet())).distinct().forEach { field ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Label(field)
+                                        if (field == "Remaining distance") {
+                                            Text(distanceText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = distanceColor)
+                                        } else Text(freight.get(field))
+                                    }
+                                    if (freight.values.containsKey(field)) IconButton(onClick = { app.copy(field, freight.get(field)) }) {
+                                        Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
+                                    }
+                                }
                             }
                         }
                     }
@@ -836,10 +874,14 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
                         TextButton(onClick = { expanded = if (row in expanded) expanded - row else expanded + row }) {
                             Text(if (row in expanded) "Hide station details" else "Station details")
                         }
-                        if (row in expanded) {
-                            Text("Railway zone · ${row.zone.ifBlank { "Not Reported" }}")
-                            Text("Railway division · ${row.division.ifBlank { "Not Reported" }}")
-                            Text("Movement · ${row.movement.ifBlank { "Not Reported" }}")
+                        AnimatedVisibility(row in expanded,
+                            enter = expandVertically(tween(200)) + fadeIn(tween(180)),
+                            exit = shrinkVertically(tween(150)) + fadeOut(tween(110))) {
+                            Column {
+                                Text("Railway zone · ${row.zone.ifBlank { "Not Reported" }}")
+                                Text("Railway division · ${row.division.ifBlank { "Not Reported" }}")
+                                Text("Movement · ${row.movement.ifBlank { "Not Reported" }}")
+                            }
                         }
                     }
                 }

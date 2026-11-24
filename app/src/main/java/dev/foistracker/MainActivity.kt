@@ -421,7 +421,7 @@ class MainActivity : FragmentActivity() {
         val updated = services.store.record(key, rows)
         Tracking.notifyChanges(this, services, key, previous, updated)
         if (notifyOnRefresh) {
-            Tracking.notify(this, services, key, Alert.REFRESH, "Latest freight details are available.",
+            Tracking.notify(this, services, key, Alert.REFRESH, notificationArrivals(updated),
                 updated.maxOf(Freight::retrieved).toString())
         }
         if (query.isFnr && updated.firstOrNull()?.arrived != null) services.store.pause(key)
@@ -438,7 +438,7 @@ class MainActivity : FragmentActivity() {
         page = ResultPage(query, result, false, index.coerceAtLeast(0))
     }
 
-    internal fun startBackgroundLive(query: Query) {
+    internal fun startBackgroundLive(query: Query, freight: List<Freight>) {
         if (!foreground || !services.signedIn.value) return
         if (!notificationsAllowed) {
             enableNotifications()
@@ -447,7 +447,8 @@ class MainActivity : FragmentActivity() {
         }
         try {
             ContextCompat.startForegroundService(this, Intent(this, LiveTrackingService::class.java)
-                .putExtra(LiveTrackingService.QUERY, query.storageKey))
+                .putExtra(LiveTrackingService.QUERY, query.storageKey)
+                .putExtra(LiveTrackingService.ARRIVAL, notificationArrivals(freight)))
         } catch (_: IllegalStateException) {
             message = "Android could not start background Live tracking. Try again while the app is open."
         } catch (_: SecurityException) {
