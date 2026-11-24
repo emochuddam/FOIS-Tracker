@@ -1,0 +1,2 @@
+plugins { id 'com.android.application' version '8.7.3' }
+android { namespace 'org.railtracker.fois'; compileSdk 35; defaultConfig { applicationId 'org.railtracker.fois'; minSdk 23; targetSdk 35; versionCode 1; versionName '1.0' } }
