@@ -2,7 +2,7 @@
 
 ![FOIS Tracker railway project banner](docs/fois-tracker-banner.png)
 
-FOIS Tracker is an independent native Android client for Indian Railways freight enquiries. Indian Railways does not operate or endorse this app.
+FOIS Tracker is an independent Android app for Indian Railways freight enquiries. Look up an FNR, search station pairs with an authorized ECBS account, and track saved freight with ETA alerts. Cached results are available offline and can be exported as PDF, CSV, or text. Indian Railways does not operate or endorse this app.
 
 ## Install
 
