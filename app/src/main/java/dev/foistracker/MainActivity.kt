@@ -61,24 +61,10 @@ class MainActivity : FragmentActivity() {
     internal var storedPassword by mutableStateOf("")
     internal var saved by mutableStateOf(emptyList<Saved>())
     internal var history by mutableStateOf(emptyList<Entry>())
-    private var report: Pair<Freight, ReportFormat>? = null
     private var pendingKey: String? = null
     private var prompting = false
     private var wentToBackground = false
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updateNotificationState() }
-    private val saveReport = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val data = report
-        report = null
-        val uri = result.data?.data
-        if (uri != null && data != null) {
-            execute {
-                contentResolver.openOutputStream(uri)?.use { Reports.write(data.second, data.first, it) }
-                    ?: throw IOException()
-                withContext(Dispatchers.Main) { message = "Report saved." }
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -501,14 +487,6 @@ class MainActivity : FragmentActivity() {
     }
     internal fun paste(): String = getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
         ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-    internal fun export(freight: Freight, format: ReportFormat) {
-        val id = freight.fnr.takeIf { it.matches(Regex("[0-9]{11}")) } ?: "Freight"
-        val name = "FOIS-$id.${format.extension}"
-        report = freight to format
-        saveReport.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).setType(format.mime)
-            .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, name))
-    }
-
     internal fun channelSettings(alert: Alert) {
         startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)

@@ -15,7 +15,6 @@ import org.junit.Assert.*
 import androidx.test.rule.GrantPermissionRule
 import org.junit.Rule
 import org.junit.Test
-import java.io.ByteArrayOutputStream
 
 class TrackerDeviceTest {
     @get:Rule(order = 0)
@@ -92,10 +91,11 @@ class TrackerDeviceTest {
         }
     }
 
-    @Test fun buildsValidPdfHeader() {
-        val bytes = ByteArrayOutputStream()
-        Reports.write(ReportFormat.PDF, Freight(mapOf("FNR" to "01234567890")), bytes)
-        assertTrue(bytes.toByteArray().take(5).toByteArray().decodeToString().startsWith("%PDF"))
-        assertTrue(bytes.size() > 1000)
+    @Test fun backgroundLiveActionIsVisibleOnGuestResults() {
+        val fnr = "01234567890"
+        compose.runOnIdle {
+            compose.activity.page = ResultPage(Query(fnr), listOf(Freight(mapOf("FNR" to fnr))), true)
+        }
+        compose.onNodeWithText("Keep live in background").assertIsDisplayed()
     }
 }

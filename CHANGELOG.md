@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7
+
+- Applied the attached UI kit’s gradient palette, Montserrat typography, and softly raised controls.
+- Made background Live a prominent button at the top of freight results and added a softly pulsing Live indicator.
+- Removed the file export action and Journey timeline screen section.
+
 ## 1.0.6
 
 - Smoothed screen changes, button presses, and freight detail expansion.

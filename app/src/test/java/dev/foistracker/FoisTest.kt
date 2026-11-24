@@ -200,9 +200,7 @@ class FoisTest {
         assertTrue(freightAlerts(b, b).isEmpty())
     }
 
-    @Test fun reportsQuoteCsvAndIncludeJourney() {
-        assertEquals("\"'=1+1\"", Reports.csvCell("=1+1"))
-        assertEquals("\"A,\"\"B\"\"\"", Reports.csvCell("A,\"B\""))
+    @Test fun clipboardReportIncludesStationHistory() {
         val text = Reports.text(Freight(mapOf("FNR" to "01234567890"), listOf(Journey("Alpha", "", "", "", "", ""))))
         assertTrue(text.contains("Journey station: Alpha"))
         assertTrue(text.contains("Report generated"))
