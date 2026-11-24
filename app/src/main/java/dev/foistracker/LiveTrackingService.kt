@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.*
@@ -20,6 +21,11 @@ class LiveTrackingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val services by lazy { Services.get(this) }
     private var tracking: Job? = null
+    private val wakeLock by lazy {
+        getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:LiveTracking")
+            .apply { setReferenceCounted(false) }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -51,6 +57,8 @@ class LiveTrackingService : Service() {
         tracking = scope.launch {
             try {
                 while (isActive) {
+                    // Keep the CPU available for the requested live cadence while the screen is off.
+                    wakeLock.acquire(60_000)
                     val arrived = try {
                         withContext(Dispatchers.IO) {
                             services.networkLock.withLock {
@@ -83,6 +91,7 @@ class LiveTrackingService : Service() {
                             services.liveTracking.value = LiveTrackingState(query, paused = true)
                             manager.notify(NOTIFICATION_ID, notification(query, true))
                         }
+                        if (wakeLock.isHeld) wakeLock.release()
                         delay(30_000)
                         continue
                     }
@@ -106,6 +115,7 @@ class LiveTrackingService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        if (wakeLock.isHeld) wakeLock.release()
         services.liveTracking.value = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
