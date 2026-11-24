@@ -343,8 +343,11 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                     keyboard?.hide()
                     if (route) {
                         val stationList = stations + learned
-                        fun code(text: String) = stationList.firstOrNull { it.second.equals(text.trim(), true) }
-                            ?.first ?: text.trim()
+                        fun code(text: String): String {
+                            val value = text.trim()
+                            return stationList.firstOrNull { it.second.isNotBlank() && it.second.equals(value, true) }
+                                ?.first ?: value
+                        }
                         val parsed = Query.parse("${code(origin)} ${code(dest)}", app.consignor)
                         if (parsed == null || parsed.isFnr) app.message = "Select two station codes or enter them directly."
                         else { app.queryText = parsed.key; app.open(parsed) }
@@ -686,7 +689,7 @@ private fun FreightUi(app: MainActivity, page: ResultPage) {
             delay(1000)
         }
     }
-    LaunchedEffect(page.query.storageKey, polling) {
+    LaunchedEffect(page.query.storageKey, freight.retrieved, polling) {
         if (polling) {
             // Start the next interval after the previous request finishes.
             delay(30_000)
