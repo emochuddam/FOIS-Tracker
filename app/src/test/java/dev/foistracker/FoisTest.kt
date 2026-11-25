@@ -45,6 +45,25 @@ class FoisTest {
         assertEquals("Alpha (AAA)", result.journey.single().station)
     }
 
+    @Test fun enquiryDenialKeepsAValidSession() = MockWebServer().use { server ->
+        server.enqueue(MockResponse().setResponseCode(403))
+        server.enqueue(MockResponse().setBody("<a href='/logout'>Logout</a>"))
+        assertThrows(FoisError.AccessDenied::class.java) {
+            FoisClient(root = server.url("/")).enquiry(Query("RMN CFS"))
+        }
+    }
+
+    @Test fun badEnquiryOnlyExpiresTheSessionWhenHomeConfirmsIt() = MockWebServer().use { server ->
+        server.enqueue(MockResponse().setResponseCode(401))
+        server.enqueue(MockResponse().setResponseCode(503))
+        server.enqueue(MockResponse().setResponseCode(403))
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/ecbs/JSP/LoginNew.jsp"))
+        val client = FoisClient(root = server.url("/"))
+        assertThrows(FoisError.Unavailable::class.java) { client.enquiry(Query("RMN CFS")) }
+        assertThrows(FoisError.Authentication::class.java) { client.enquiry(Query("RMN CFS")) }
+        assertFalse(FreightParser.expired("<script>function submitLogin() {}</script><a href='LoginNew.jsp'>Sign in</a>"))
+    }
+
     @Test fun distinguishesEmptyChangedAndExpiredResponses() {
         assertThrows(FoisError.Authentication::class.java) {
             FreightParser.details("<form onsubmit='submitLogin()'></form>", "01234567890")

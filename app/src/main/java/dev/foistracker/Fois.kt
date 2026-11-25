@@ -60,6 +60,7 @@ sealed class FoisError(message: String) : IOException(message) {
     class Credentials : FoisError("FOIS rejected sign-in. Check your username and password.")
     class Format : FoisError("FOIS returned an unrecognized response. Try again later.")
     class Empty : FoisError("FOIS found no matching consignments.")
+    class AccessDenied : FoisError("FOIS refused this enquiry. Your saved session was kept. Try again later.")
     class Unavailable : FoisError("FOIS is unavailable. Try again later.")
 }
 
@@ -84,7 +85,15 @@ object FreightParser {
     fun clean(text: String) = text.trim().takeUnless { it.isBlank() || it.uppercase() in setOf("N/A", "NA", "-", "--", "NOT REPORTED") }
     fun cells(row: Element) = row.children().filter { it.tagName() in setOf("td", "th") }
     private fun key(text: String) = aliases[normalized(text)]
-    fun expired(html: String) = html.contains("LoginNew", true) || html.contains("submitLogin", true)
+    fun expired(html: String): Boolean {
+        if (!html.contains("LoginNew", true) && !html.contains("submitLogin", true)) return false
+        return Jsoup.parse(html).select("form").any { form ->
+            form.attr("onsubmit").contains("submitLogin", true) ||
+                form.attr("action").contains("LoginNew.jsp", true) ||
+                form.selectFirst("input[type=password]") != null &&
+                form.selectFirst("input[name=txtUserId], input[name=txtUserID]") != null
+        }
+    }
     fun empty(doc: Document) = Regex("no (?:matching |freight )?(?:records?|data|results?|consignments?)|invalid fnr|not found", RegexOption.IGNORE_CASE).containsMatchIn(doc.text())
 
     fun details(html: String, fnr: String, public: Boolean = false): Freight {
@@ -313,10 +322,15 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
             http.newCall(builder.build()).execute().use { response ->
                 if (response.code in listOf(301, 302, 303, 307, 308)) {
                     val destination = response.header("Location")?.let(url::resolve) ?: throw FoisError.Format()
+                    if (!public && path != loginPage &&
+                        form?.get("operation") != "login" &&
+                        destination.host == root.host && destination.scheme == root.scheme && destination.port == root.port &&
+                        destination.encodedPath.equals("/$loginPage", true)) throw FoisError.Authentication()
                     if (response.code in listOf(301, 302, 303)) payload = null
                     url = destination
                 } else {
-                    if (response.code in listOf(401, 403) && !public) throw FoisError.Authentication()
+                    if (!public && response.code == 401) throw FoisError.Authentication()
+                    if (!public && response.code == 403) throw FoisError.AccessDenied()
                     if (!response.isSuccessful) throw FoisError.Unavailable()
                     val body = response.body ?: throw FoisError.Format()
                     val source = body.source()
@@ -353,11 +367,25 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
         if (!validate()) throw FoisError.Credentials()
     }
 
-    fun validate(): Boolean = try {
+    private enum class SessionCheck { VALID, EXPIRED, UNKNOWN }
+
+    private fun checkSession(): SessionCheck = try {
         val html = request(home, query = mapOf("action" to "Query")).decodeToString()
-        !FreightParser.expired(html) && listOf("logout", "QryInsight", "HomeLinks").any { html.contains(it, true) }
+        when {
+            FreightParser.expired(html) -> SessionCheck.EXPIRED
+            listOf("logout", "QryInsight", "HomeLinks").any { html.contains(it, true) } -> SessionCheck.VALID
+            else -> SessionCheck.UNKNOWN
+        }
     } catch (_: FoisError.Authentication) {
-        false
+        SessionCheck.EXPIRED
+    } catch (_: IOException) {
+        SessionCheck.UNKNOWN
+    }
+
+    fun validate(): Boolean = when (checkSession()) {
+        SessionCheck.VALID -> true
+        SessionCheck.EXPIRED -> false
+        SessionCheck.UNKNOWN -> throw FoisError.Unavailable()
     }
 
     fun signOut() {
@@ -388,9 +416,18 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
         return FreightParser.details(html, fnr, public = true)
     }
 
-    fun enquiry(query: Query): List<Freight> = if (query.isFnr) listOf(fnr(query.key)) else {
-        val (origin, destination) = query.key.split(' ')
-        route(origin, destination, query.consignor).ifEmpty { throw FoisError.Empty() }
+    fun enquiry(query: Query): List<Freight> = try {
+        if (query.isFnr) listOf(fnr(query.key)) else {
+            val (origin, destination) = query.key.split(' ')
+            route(origin, destination, query.consignor).ifEmpty { throw FoisError.Empty() }
+        }
+    } catch (error: FoisError) {
+        if (error !is FoisError.Authentication && error !is FoisError.AccessDenied) throw error
+        when (checkSession()) {
+            SessionCheck.EXPIRED -> throw FoisError.Authentication()
+            SessionCheck.VALID -> throw FoisError.AccessDenied()
+            SessionCheck.UNKNOWN -> throw FoisError.Unavailable()
+        }
     }
 
     private fun fnr(number: String): Freight {
