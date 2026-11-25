@@ -45,7 +45,7 @@ class FoisTest {
         assertEquals("Alpha (AAA)", result.journey.single().station)
     }
 
-    @Test fun enquiryDenialKeepsAValidSession() = MockWebServer().use { server ->
+    @Test fun enquiryDenialKeepsAValidSession(): Unit = MockWebServer().use { server ->
         server.enqueue(MockResponse().setResponseCode(403))
         server.enqueue(MockResponse().setBody("<a href='/logout'>Logout</a>"))
         assertThrows(FoisError.AccessDenied::class.java) {
