@@ -91,6 +91,20 @@ class TrackerDeviceTest {
         compose.onNodeWithText("Cancel").performClick()
     }
 
+    @Test fun removesSavedFreightFromTrackingScreen() {
+        val item = Saved("01234567897", "Removal fixture", false, false)
+        val store = compose.activity.services.store
+        store.save(item)
+        try {
+            compose.onNodeWithText("Tracking").performClick()
+            compose.onNodeWithText("Find saved freight").performTextInput(item.key)
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Remove"))
+            compose.onNodeWithText("Remove").performClick()
+            compose.onNodeWithText("Remove freight").performClick()
+            compose.waitUntil(5_000) { store.saved().none { it.key == item.key } }
+        } finally { store.delete(item.key) }
+    }
+
     @Test fun persistsSavedAndCachedFreightAndDeduplicatesAlerts() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val key = "01234567891"

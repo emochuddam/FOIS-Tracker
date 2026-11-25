@@ -608,6 +608,12 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
             val query = Query.fromStorage(item.key)
             val freight = app.history.find { it.key == item.key }?.freight?.firstOrNull()
             Panel {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { editing = item }) { Text("Edit") }
+                    TextButton(onClick = { deleting = item }) {
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 EntryTile(item.name.ifBlank { query.key }, query.key + if (item.favorite) " · Favourite" else "") { app.open(query) }
                 if (freight != null) {
                     RouteSummary(freight, query, compact = true)
@@ -615,18 +621,14 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
                     Text("Last reported · ${freight.get("Last reported station")}")
                 }
                 if (query.isFnr) SettingSwitch("Automatic tracking", item.tracking) { app.save(item.copy(tracking = it)) }
-                Row {
-                    TextButton(onClick = { editing = item }) { Text("Edit") }
-                    TextButton(onClick = { deleting = item }) { Text("Delete") }
-                }
             }
         }
     }
     editing?.let { item -> SavedDialog(app, item, initialKey = draftKey) { editing = null } }
     deleting?.let { item ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete saved freight?") },
-            text = { Text(item.name.ifBlank { Query.fromStorage(item.key).key }) },
-            confirmButton = { TextButton(onClick = { app.delete(item); deleting = null }) { Text("Delete") } },
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Remove saved freight?") },
+            text = { Text("Remove ${item.name.ifBlank { Query.fromStorage(item.key).key }} from Saved & Tracking?") },
+            confirmButton = { TextButton(onClick = { app.delete(item); deleting = null }) { Text("Remove freight") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
     }
 }

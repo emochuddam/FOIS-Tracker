@@ -485,9 +485,17 @@ class MainActivity : FragmentActivity() {
     }
 
     internal fun delete(item: Saved) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            services.store.delete(item.key)
-            Tracking.sync(this@MainActivity, services)
+        if (services.liveTracking.value?.query?.storageKey == item.key) stopBackgroundLive()
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    services.store.delete(item.key)
+                    Tracking.sync(this@MainActivity, services)
+                }
+                message = "Freight removed from Saved & Tracking."
+            } catch (_: android.database.SQLException) {
+                message = "Could not remove saved freight. Try again."
+            }
         }
     }
     internal fun clearHistory() {

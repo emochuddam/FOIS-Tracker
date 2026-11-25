@@ -2,6 +2,7 @@
 
 ## 1.0.9
 
+- Make Remove visible on saved freight cards and stop background Live when removing its enquiry.
 - Confirm ECBS session expiry before clearing a saved login after a rejected freight enquiry.
 - Preserve saved sessions when authentication cannot be verified because FOIS is temporarily unavailable.
 ## 1.0.8
