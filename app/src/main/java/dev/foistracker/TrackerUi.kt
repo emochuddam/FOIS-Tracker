@@ -2,28 +2,39 @@ package dev.foistracker
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.window.SecureFlagPolicy
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -36,9 +47,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,9 +56,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -64,49 +71,49 @@ import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
 
-private val actionGradient = Brush.horizontalGradient(listOf(Color(0xFF106FCA), Color(0xFF3920EB)))
 private val LocalDarkAppearance = compositionLocalOf { false }
-private val darkActionGradient = Brush.horizontalGradient(listOf(Color(0xFF7544D7), Color(0xFF5445CC)))
-private val light = lightColorScheme(
-    primary = Color(0xFF3325CA), onPrimary = Color.White, primaryContainer = Color(0xFFE7E8FF),
-    onPrimaryContainer = Color(0xFF211680), secondary = Color(0xFF485671), secondaryContainer = Color(0xFFE5EBF6),
-    onSecondaryContainer = Color(0xFF24314E), background = Color(0xFFDFE8EF),
-    onBackground = Color(0xFF202638), surface = Color(0xFFFCFCFF), onSurface = Color(0xFF202638),
-    surfaceVariant = Color(0xFFE5E9F1), onSurfaceVariant = Color(0xFF465366),
-    surfaceContainer = Color(0xFFF0F3FA), surfaceContainerHigh = Color(0xFFE9EDF7), outline = Color(0xFF677487)
-)
+private val LocalMotionScale = compositionLocalOf { 1f }
+private val liveGreen = Color(0xFF39B987)
+private val actionBlue = Color(0xFF2467D1)
 private val dark = darkColorScheme(
-    primary = Color(0xFFBF9DFF), onPrimary = Color(0xFF33176D), primaryContainer = Color(0xFF342458),
-    onPrimaryContainer = Color(0xFFE8D9FF), secondary = Color(0xFFA8BFD6), secondaryContainer = Color(0xFF142B40),
-    onSecondaryContainer = Color(0xFFDBE9F7), background = Color(0xFF252C3B),
-    onBackground = Color(0xFFF3F7FF), surface = Color(0xFF0E1927), onSurface = Color(0xFFF3F7FF),
-    surfaceVariant = Color(0xFF192C3F), onSurfaceVariant = Color(0xFFABC0D5),
-    surfaceContainer = Color(0xFF112234), surfaceContainerHigh = Color(0xFF172B3F), outline = Color(0xFF7894B0)
+    primary = Color(0xFF91C3FF), onPrimary = Color(0xFF101318), primaryContainer = Color(0xFF182D45),
+    onPrimaryContainer = Color(0xFFF4F6FA), secondary = Color(0xFFA1ADBE), secondaryContainer = Color(0xFF303946),
+    onSecondaryContainer = Color(0xFFF4F6FA), background = Color(0xFF101318), onBackground = Color(0xFFF4F6FA),
+    surface = Color(0xFF1B2028), onSurface = Color(0xFFF4F6FA), surfaceVariant = Color(0xFF303946),
+    onSurfaceVariant = Color(0xFFA1ADBE), outline = Color(0xFF303946), surfaceContainer = Color(0xFF1B2028),
+    surfaceContainerHigh = Color(0xFF303946), error = Color(0xFFE86C72)
 )
-private val lightTypography = trackerTypography(FontFamily(
-    Font(R.font.montserrat_regular), Font(R.font.montserrat_semibold, FontWeight.SemiBold),
-    Font(R.font.montserrat_bold, FontWeight.Bold)
-))
-private val darkTypography = trackerTypography(FontFamily(
-    Font(R.font.prompt_regular), Font(R.font.prompt_semibold, FontWeight.SemiBold),
-    Font(R.font.prompt_bold, FontWeight.Bold)
-))
+private val light = lightColorScheme(
+    primary = Color(0xFF155FC5), onPrimary = Color.White, primaryContainer = Color(0xFFDCEBFC),
+    onPrimaryContainer = Color(0xFF172337), secondary = Color(0xFF596779), secondaryContainer = Color(0xFFD6DFE9),
+    onSecondaryContainer = Color(0xFF172337), background = Color(0xFFF3F5F8), onBackground = Color(0xFF172337),
+    surface = Color.White, onSurface = Color(0xFF172337), surfaceVariant = Color(0xFFD6DFE9),
+    onSurfaceVariant = Color(0xFF596779), outline = Color(0xFFD6DFE9), surfaceContainer = Color.White,
+    surfaceContainerHigh = Color(0xFFDCEBFC), error = Color(0xFFB02434)
+)
+private val tabs = listOf("Home", "Without Credentials", "Settings")
+private val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.Settings)
+private val numberStyle = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+@OptIn(ExperimentalSharedTransitionApi::class)
+private val LocalSharedTransition = compositionLocalOf<SharedTransitionScope?> { null }
+private val LocalScreenTransition = compositionLocalOf<AnimatedVisibilityScope?> { null }
 
-private fun trackerTypography(family: FontFamily) = Typography().run {
-    copy(
-        displayLarge = displayLarge.copy(fontFamily = family), displayMedium = displayMedium.copy(fontFamily = family),
-        displaySmall = displaySmall.copy(fontFamily = family), headlineLarge = headlineLarge.copy(fontFamily = family),
-        headlineMedium = headlineMedium.copy(fontFamily = family), headlineSmall = headlineSmall.copy(fontFamily = family),
-        titleLarge = titleLarge.copy(fontFamily = family), titleMedium = titleMedium.copy(fontFamily = family),
-        titleSmall = titleSmall.copy(fontFamily = family), bodyLarge = bodyLarge.copy(fontFamily = family),
-        bodyMedium = bodyMedium.copy(fontFamily = family), bodySmall = bodySmall.copy(fontFamily = family),
-        labelLarge = labelLarge.copy(fontFamily = family), labelMedium = labelMedium.copy(fontFamily = family),
-        labelSmall = labelSmall.copy(fontFamily = family)
-    )
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun Modifier.sharedFreightNumber(page: ResultPage, index: Int): Modifier {
+    val shared = LocalSharedTransition.current ?: return this
+    val screen = LocalScreenTransition.current ?: return this
+    val motion = LocalMotionScale.current
+    if (motion == 0f) return this
+    return with(shared) {
+        sharedElement(rememberSharedContentState("fnr/${page.query.storageKey}/$index"), screen,
+            boundsTransform = { _, _ -> tween((350 * motion).toInt()) })
+    }
 }
-private val tabs = listOf("Home", "Search", "Tracking", "History", "Settings")
-private val icons = listOf(Icons.Default.Home, Icons.Default.Search, Icons.Default.LocationOn, Icons.AutoMirrored.Filled.List, Icons.Default.Settings)
-@OptIn(ExperimentalMaterial3Api::class)
+
+private val SecureDialog = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun TrackerApp(app: MainActivity) {
     val darkMode = when (app.themeMode) {
@@ -121,15 +128,28 @@ fun TrackerApp(app: MainActivity) {
         bars.isAppearanceLightNavigationBars = !darkMode
     }
     val signedIn by app.services.signedIn.collectAsState()
-    val backdrop = remember(darkMode) {
-        Brush.linearGradient(
-            if (darkMode) listOf(Color(0xFF272D3F), Color(0xFF212632))
-            else listOf(Color(0xFFD0DEE4), Color(0xFFEBEFF9))
-        )
+    val recovery by app.services.recovery.collectAsState()
+    LaunchedEffect(recovery, app.foreground, app.loading, app.locked) { app.maybePromptRecovery(recovery) }
+    val page = app.page
+    val live by app.services.liveTracking.collectAsState()
+    val seconds by app.services.intervalSeconds.collectAsState()
+    val candidate = page?.takeIf { it.freight.any { item -> item.source != "Public FNR" && item.arrived == null } }
+    val polling = candidate != null && app.trackingEnabled && signedIn && app.foreground && !app.locked &&
+        app.challenge == null && !app.loading && app.refreshIssue == null && live?.query != candidate.query
+    val queryToPoll = candidate?.query?.takeIf { polling }
+    LaunchedEffect(queryToPoll, candidate?.freight?.maxOfOrNull(Freight::retrieved), seconds) {
+        if (queryToPoll != null) {
+            delay(seconds * 1000)
+            kotlinx.coroutines.yield()
+            app.refresh(queryToPoll, automatic = true)
+        }
     }
-    CompositionLocalProvider(LocalDarkAppearance provides darkMode) {
-        MaterialTheme(colorScheme = colors, typography = if (darkMode) darkTypography else lightTypography) {
-            Box(Modifier.fillMaxSize().background(backdrop)) {
+    val motion = if (app.reducedMotion) 0f else 1f / app.motionSpeed
+    val background by animateColorAsState(colors.background, tween((225 * motion).toInt()), label = "Theme background")
+    val stateHolder = rememberSaveableStateHolder()
+    CompositionLocalProvider(LocalDarkAppearance provides darkMode, LocalMotionScale provides motion) {
+        MaterialTheme(colorScheme = colors, typography = Typography()) {
+            Box(Modifier.fillMaxSize().background(background)) {
                 Column(Modifier.widthIn(max = 820.dp).fillMaxSize().safeDrawingPadding().imePadding()
                     .align(Alignment.TopCenter)) {
                     if (app.locked) {
@@ -142,20 +162,26 @@ fun TrackerApp(app: MainActivity) {
                         }
                     } else {
                         val challenge = app.challenge
-                        val page = app.page
+                        val page = app.visiblePage
                         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            if (challenge != null || page != null) {
-                                IconButton(onClick = { if (!app.loading || app.automaticRefresh) { if (challenge != null) app.closeChallenge() else app.page = null } }) {
+                            if (challenge != null || app.searching || app.detailsOpen || app.settingsSection != null) {
+                                IconButton(onClick = app::goBack) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                                 }
                             }
                             Brand(Modifier.weight(1f))
-                            if (page != null && challenge == null) {
+                            IconButton(onClick = { app.chooseTheme(if (darkMode) ThemeMode.LIGHT else ThemeMode.DARK) }) {
+                                Icon(painterResource(R.drawable.ic_theme), if (darkMode) "Use light theme" else "Use dark theme")
+                            }
+                            if (page != null && challenge == null && app.detailsOpen) {
                                 IconButton(onClick = { app.refresh(page.query, notifyOnRefresh = true) }, enabled = !app.loading) {
                                     Icon(Icons.Default.Refresh, "Refresh freight")
                                 }
                             }
+                        }
+                        if (challenge == null && !app.searching && (app.tab == 0 || app.detailsOpen)) {
+                            TrackingToolbar(app, signedIn)
                         }
                         app.message?.let { message ->
                             Surface(color = colors.secondaryContainer, shape = RoundedCornerShape(16.dp),
@@ -167,36 +193,41 @@ fun TrackerApp(app: MainActivity) {
                             }
                         }
                         if (app.loading && !app.automaticRefresh) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
-                        AnimatedContent(
-                            targetState = Triple(app.tab, page, challenge),
-                            modifier = Modifier.weight(1f),
-                            contentKey = { (tab, result, verification) ->
-                                when {
-                                    result != null -> "result/${result.query.storageKey}"
-                                    verification != null -> "verification"
-                                    else -> "tab/$tab"
+                        val screen = when {
+                            challenge != null && page == null -> "verification"
+                            app.searching -> "search"
+                            app.detailsOpen && page != null -> "freight"
+                            else -> "tab/${app.tab}"
+                        }
+                        SharedTransitionLayout(Modifier.weight(1f)) {
+                            val sharedScope = this
+                            AnimatedContent(
+                                targetState = screen, modifier = Modifier.fillMaxSize(),
+                                transitionSpec = {
+                                    (fadeIn(tween((290 * motion).toInt())) +
+                                        slideInHorizontally(tween((300 * motion).toInt())) { it / 24 }) togetherWith
+                                        fadeOut(tween((180 * motion).toInt()))
+                                },
+                                label = "Tracker screens"
+                            ) { destination ->
+                                val screenScope = this
+                                CompositionLocalProvider(LocalSharedTransition provides sharedScope, LocalScreenTransition provides screenScope) {
+                                    stateHolder.SaveableStateProvider(destination) {
+                                        when (destination) {
+                                            "verification" -> challenge?.let { ChallengeUi(app, it) }
+                                            "search" -> Search(app, signedIn)
+                                            "freight" -> page?.let { FreightUi(app, it) }
+                                            "tab/0" -> Home(app, signedIn)
+                                            "tab/1" -> PublicPage(app)
+                                            else -> Preferences(app, signedIn)
+                                        }
+                                    }
                                 }
-                            },
-                            transitionSpec = {
-                                val direction = if (targetState.first < initialState.first) -1 else 1
-                                (fadeIn(tween(200)) + slideInHorizontally(tween(240)) { it * direction / 20 }) togetherWith
-                                    (fadeOut(tween(130)) + slideOutHorizontally(tween(200)) { -it * direction / 24 })
-                            },
-                            label = "Tracker screens"
-                        ) { (tab, result, verification) ->
-                            when {
-                                result != null -> FreightUi(app, result)
-                                verification != null -> ChallengeUi(app, verification)
-                                tab == 0 -> Home(app, signedIn)
-                                tab == 1 -> Search(app, signedIn)
-                                tab == 2 -> SavedScreen(app, signedIn)
-                                tab == 3 -> History(app)
-                                else -> Preferences(app, signedIn)
                             }
                         }
                         if (challenge != null && page != null) {
                             Dialog(onDismissRequest = { if (!app.loading) app.closeChallenge() },
-                                properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                                properties = DialogProperties(usePlatformDefaultWidth = false, securePolicy = SecureFlagPolicy.SecureOn)) {
                                 Surface(Modifier.fillMaxWidth(.95f).widthIn(max = 620.dp).fillMaxHeight(.88f),
                                     shape = RoundedCornerShape(28.dp), color = colors.background) {
                                     Column {
@@ -212,13 +243,16 @@ fun TrackerApp(app: MainActivity) {
                                 }
                             }
                         }
-                        if (challenge == null && page == null) Navigation(app.tab) { app.tab = it; app.message = null }
+                        if (challenge == null && !app.searching && !app.detailsOpen && app.settingsSection == null) {
+                                Navigation(app.tab) { app.tab = it; app.message = null }
+                            }
                     }
                 }
             }
             if (app.themeMode == null && !app.locked && app.challenge == null) {
                 AlertDialog(
                     onDismissRequest = { app.chooseTheme(ThemeMode.SYSTEM) },
+                    properties = SecureDialog,
                     title = { Text("Choose your theme") },
                     text = { ThemeChoices(selected = null, choose = app::chooseTheme) },
                     confirmButton = {}
@@ -235,7 +269,10 @@ private fun Brand(modifier: Modifier = Modifier) {
             Icon(painterResource(R.drawable.ic_rail), null, modifier = Modifier.padding(8.dp).size(22.dp),
                 tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
-        Text("FOIS Tracker", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+        Column {
+            Text("FOIS Tracker", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+            Text("RAIL MONITOR", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -245,50 +282,35 @@ private fun ActionButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        if (pressed && enabled) 0.97f else 1f,
-        animationSpec = spring(dampingRatio = 0.86f, stiffness = 320f),
-        label = "Button press"
-    )
-    val elevation by androidx.compose.animation.core.animateDpAsState(
-        if (!enabled) 0.dp else if (pressed) 2.dp else 6.dp,
-        label = "Button shadow"
-    )
-    val shape = RoundedCornerShape(50)
-    val ink = MaterialTheme.colorScheme
-    Button(
-        onClick = action,
-        enabled = enabled,
-        interactionSource = interaction,
-        shape = shape,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Transparent, contentColor = Color.White,
-            disabledContainerColor = ink.surfaceVariant, disabledContentColor = ink.onSurfaceVariant
-        ),
-        modifier = modifier.heightIn(min = 48.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .shadow(elevation, shape)
-            .then(if (enabled) Modifier.background(if (LocalDarkAppearance.current) darkActionGradient else actionGradient, shape) else Modifier)
+    val motion = LocalMotionScale.current
+    val haptic = LocalHapticFeedback.current
+    val scale by animateFloatAsState(if (pressed && enabled && motion != 0f) 0.98f else 1f,
+        tween((150 * motion).toInt()), label = "Button press")
+    Button(onClick = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        action()
+    }, enabled = enabled, interactionSource = interaction,
+        shape = RoundedCornerShape(15.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = actionBlue, contentColor = Color.White),
+        modifier = modifier.heightIn(min = 48.dp).graphicsLayer { scaleX = scale; scaleY = scale }
     ) { Text(label, fontWeight = FontWeight.SemiBold) }
 }
 
 @Composable
 private fun Navigation(selected: Int, select: (Int) -> Unit) {
-    val shape = RoundedCornerShape(27.dp)
     val colors = MaterialTheme.colorScheme
     NavigationBar(
-        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp).shadow(8.dp, shape).clip(shape),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
         containerColor = colors.surface, windowInsets = WindowInsets(0)
     ) {
         tabs.forEachIndexed { index, title ->
             val active = index == selected
-            val iconScale by animateFloatAsState(if (active) 1.12f else 1f,
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = 330f), label = "$title tab")
+            val iconScale = if (active) 1.06f else 1f
             NavigationBarItem(
                 selected = active,
                 onClick = { select(index) },
                 icon = { Icon(icons[index], null, Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale }) },
-                label = { Text(title, maxLines = 1) },
+                label = { Text(title, maxLines = 2, style = MaterialTheme.typography.labelSmall) },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = colors.primary, selectedTextColor = colors.primary,
                     indicatorColor = colors.primaryContainer, unselectedIconColor = colors.onSurfaceVariant,
@@ -302,15 +324,9 @@ private fun Navigation(selected: Int, select: (Int) -> Unit) {
 @Composable
 private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val sheen = remember(colors) { Brush.horizontalGradient(listOf(colors.surface, colors.surfaceContainer)) }
-    Card(
-        modifier = modifier.fillMaxWidth().shadow(6.dp, RoundedCornerShape(27.dp)),
-        shape = RoundedCornerShape(27.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
-        border = BorderStroke(1.dp, if (LocalDarkAppearance.current) colors.outline.copy(alpha = 0.16f) else colors.surface.copy(alpha = 0.8f))
-    ) {
-        Column(Modifier.fillMaxWidth().background(sheen).padding(17.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface)) {
+        Column(Modifier.fillMaxWidth().padding(13.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
     }
 }
 
@@ -324,52 +340,81 @@ private fun Title(text: String) {
 }
 @Composable
 private fun Feed(content: LazyListScope.() -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(18.dp, 10.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp), content = content)
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp, 8.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
 }
 
 @Composable
 private fun Home(app: MainActivity, signedIn: Boolean) {
+    val recovery by app.services.recovery.collectAsState()
     Feed {
         item {
             Panel {
-                Label("RAIL FREIGHT ENQUIRY")
-                Text("Track your freight", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                SearchInput(app)
-                ActionButton("Search freight", !app.loading) { app.search() }
+                Text(when {
+                    recovery != null && app.loading -> "Reconnecting automatically…"
+                    recovery != null -> "Session expired · FOIS verification required"
+                    signedIn -> "ECBS connected"
+                    app.signedOut && app.savedAccount != null -> "Welcome back"
+                    else -> "ECBS disconnected"
+                }, style = MaterialTheme.typography.titleMedium)
+                Text(if (app.hasSavedPassword) "Credentials saved · ${app.savedAccount.orEmpty()}" else "Credentials not saved",
+                    style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick = app::loginWithSaved, enabled = !app.loading) {
+                        Text(if (signedIn) "Re-login" else if (app.hasSavedPassword) "Login with saved credentials" else "Sign in")
+                    }
+                    if (signedIn) TextButton(onClick = { app.logout() }) { Text("Sign out") }
+                }
             }
         }
         item {
             Panel {
-                Label("ECBS ACCOUNT")
-                Text(if (signedIn) "ECBS session available" else "Guest mode", style = MaterialTheme.typography.titleLarge)
-                Text(if (signedIn) "${app.saved.count { it.tracking }} consignments scheduled for tracking"
-                    else "Sign in for station-pair enquiries and automatic tracking.")
-                if (!signedIn) TextButton(onClick = { app.beginChallenge(false) }, enabled = !app.loading) { Text("Sign in to ECBS") }
+                Title("Freight search")
+                ActionButton("Search freight", !app.loading, Modifier.fillMaxWidth()) { app.openSearch() }
             }
         }
-        if (app.saved.isNotEmpty()) {
-            item { Title("Saved freight") }
-            items(app.saved.take(4), key = { "saved/${it.key}" }) { item ->
-                EntryTile(item.name.ifBlank { Query.fromStorage(item.key).key },
-                    if (item.tracking) "Automatic tracking" else "Saved enquiry") { app.open(Query.fromStorage(item.key)) }
+        val result = app.page?.takeUnless { it.freight.firstOrNull()?.source == "Public FNR" }
+        if (result != null) {
+            item { Label(if (result.cached) "CACHED FREIGHT RESULTS" else "ACTIVE FREIGHT RESULTS") }
+            items(result.freight.indices.toList(), key = { index ->
+                val row = result.freight[index]
+                "${result.query.storageKey}/${row.fnr}/$index"
+            }) { index ->
+                FreightCard(app, result, index)
             }
         }
-        if (app.history.isNotEmpty()) {
-            item { Title("Recent searches") }
-            items(app.history.take(5), key = { "history/${it.key}" }) { entry ->
-                EntryTile(Query.fromStorage(entry.key).key, displayTime(entry.updated)) { app.open(Query.fromStorage(entry.key), true) }
+        recent(app)
+    }
+}
+
+@Composable
+private fun PublicPage(app: MainActivity) {
+    var input by rememberSaveable { mutableStateOf("") }
+    val result = app.publicPage
+    Feed {
+        item {
+            Panel {
+                Title("Without Credentials")
+                OutlinedTextField(input, { input = it.filter { ch -> ch in '0'..'9' }.take(11) },
+                    Modifier.fillMaxWidth(), label = { Text("11-digit FNR") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                ActionButton("Search freight", input.length == 11 && !app.loading) { app.enquire(Query(input), guest = true) }
             }
+        }
+        if (result != null) {
+            items(result.freight.indices.toList()) { index -> FreightCard(app, result, index) }
+            item { TextButton(onClick = { app.refresh(result.query, notifyOnRefresh = true) }) { Text("Refresh freight") } }
         }
     }
 }
 
 @Composable
 private fun Search(app: MainActivity, signedIn: Boolean) {
-    val initialRoute = remember { Query.parse(app.queryText)?.takeUnless(Query::isFnr) }
-    var route by remember { mutableStateOf(initialRoute != null) }
-    var origin by remember { mutableStateOf(initialRoute?.key?.substringBefore(' ').orEmpty()) }
-    var dest by remember { mutableStateOf(initialRoute?.key?.substringAfter(' ').orEmpty()) }
+    val initial = app.searchDraft
+    val initialRoute = initial?.takeUnless(Query::isFnr)
+    var route by rememberSaveable(initial?.storageKey) { mutableStateOf(initial?.isFnr != true) }
+    var origin by rememberSaveable(initial?.storageKey) { mutableStateOf(initialRoute?.key?.substringBefore(' ') ?: "RMN") }
+    var dest by rememberSaveable(initial?.storageKey) { mutableStateOf(initialRoute?.key?.substringAfter(' ') ?: "CFS") }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val learned = app.history.asSequence().flatMap { it.freight.asSequence() }
@@ -387,6 +432,7 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                 if (route) {
                     StationField(app, "Origin station", origin, stations + learned) { origin = it }
                     StationField(app, "Destination station", dest, stations + learned) { dest = it }
+                    TextButton(onClick = { val first = origin; origin = dest; dest = first }) { Text("Swap stations") }
                     OutlinedTextField(app.consignor, { app.consignor = it.take(30) }, Modifier.fillMaxWidth(),
                         label = { Text("Consignor filter") }, singleLine = true)
                     Text(if (signedIn) "Uses authorized ECBS freight enquiries." else "ECBS sign-in required. Your search will resume after sign-in.")
@@ -398,7 +444,17 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                         }) { Text("Paste route") }
                         TextButton(onClick = { origin = ""; dest = "" }) { Text("Clear") }
                     }
-                } else SearchInput(app)
+                } else {
+                    SearchInput(app)
+                    Row {
+                        TextButton(onClick = {
+                            val copied = app.paste().trim()
+                            if (copied.matches(Regex("[0-9]{11}"))) app.queryText = copied
+                            else app.message = "Clipboard does not contain an 11-digit FNR."
+                        }) { Text("Paste FNR") }
+                        TextButton(onClick = { app.queryText = "" }) { Text("Clear") }
+                    }
+                }
                 ActionButton("Search freight", !app.loading) {
                     focus.clearFocus()
                     keyboard?.hide()
@@ -411,39 +467,34 @@ private fun Search(app: MainActivity, signedIn: Boolean) {
                         }
                         val parsed = Query.parse("${code(origin)} ${code(dest)}", app.consignor)
                         if (parsed == null || parsed.isFnr) app.message = "Select two station codes or enter them directly."
-                        else { app.queryText = parsed.key; app.open(parsed) }
-                    } else app.search()
+                        else { app.queryText = parsed.key; app.enquire(parsed) }
+                    } else if (app.queryText.matches(Regex("[0-9]{11}"))) app.enquire(Query(app.queryText))
+                    else app.message = "Enter exactly 11 digits for the FNR."
                 }
             }
         }
-        recent(app)
     }
 }
 
 private fun LazyListScope.recent(app: MainActivity) {
-    if (app.history.isNotEmpty()) {
-        item { Title("Recent searches") }
-        items(app.history.take(10), key = { it.key }) { entry ->
-            EntryTile(Query.fromStorage(entry.key).key, displayTime(entry.updated)) { app.open(Query.fromStorage(entry.key), true) }
+    item { Title("Recent searches") }
+    items(app.recents, key = { "recent/${it.key}" }) { entry ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                EntryTile(Query.fromStorage(entry.key).key, displayTime(entry.updated)) {
+                    app.openSearch(Query.fromStorage(entry.key))
+                }
+            }
+            IconButton(onClick = { app.removeRecent(entry) }) { Icon(Icons.Default.Close, "Remove recent search") }
         }
     }
 }
 
 @Composable
 private fun SearchInput(app: MainActivity) {
-    val focus = LocalFocusManager.current
-    val keyboard = LocalSoftwareKeyboardController.current
-    OutlinedTextField(app.queryText, { app.queryText = it.take(90) }, Modifier.fillMaxWidth(),
-        label = { Text("FNR or station pair") }, placeholder = { Text("11 digits or RMN CFS") },
-        singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = {
-            focus.clearFocus()
-            keyboard?.hide()
-            app.search()
-        }), trailingIcon = {
-            if (app.queryText.isNotEmpty()) IconButton(onClick = { app.queryText = "" }) { Icon(Icons.Default.Clear, "Clear search") }
-        })
-    TextButton(onClick = { app.queryText = app.paste().take(90) }) { Text("Paste from clipboard") }
+    OutlinedTextField(app.queryText, { app.queryText = it.filter { ch -> ch in '0'..'9' }.take(11) }, Modifier.fillMaxWidth(),
+        label = { Text("11-digit FNR") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
 }
 
 @Composable
@@ -498,15 +549,19 @@ private fun ChallengeUi(app: MainActivity, challenge: Challenge) {
     var password by remember(app.storedPassword) { mutableStateOf(app.storedPassword) }
     var answer by remember(challenge.revision) { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
-    var rememberUser by remember(app.remembered) { mutableStateOf(app.remembered.isNotEmpty()) }
-    var savePassword by remember(app.storedPassword) { mutableStateOf(app.storedPassword.isNotEmpty()) }
+    var editCredentials by remember { mutableStateOf(app.replaceCredentials) }
+    val reuse = !editCredentials && app.remembered.isNotBlank() && app.storedPassword.isNotBlank()
     Feed {
         item {
             Panel {
                 Label(if (challenge.guest) "PUBLIC ENQUIRY" else "AUTHORIZED ECBS ACCESS")
-                Title(if (challenge.guest) "Verify your FNR enquiry" else "Sign in to FOIS")
+                Title(if (challenge.guest) "Without Credentials" else if (reuse) "FOIS verification" else "Sign in to FOIS")
                 challenge.query?.let { Text("Enquiry · ${it.key}", fontFamily = FontFamily.Monospace) }
-                if (!challenge.guest) {
+                if (!challenge.guest && reuse) {
+                    Text("Saved account · ${app.savedAccount.orEmpty()}")
+                    TextButton(onClick = { editCredentials = true; password = "" }) { Text("Change credentials") }
+                }
+                if (!challenge.guest && !reuse) {
                     OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("FOIS username") },
                         enabled = !app.loading, singleLine = true)
                     OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("FOIS password") },
@@ -529,13 +584,9 @@ private fun ChallengeUi(app: MainActivity, challenge: Challenge) {
                 TextButton(onClick = app::reloadChallenge, enabled = !app.loading) { Text("Refresh verification image") }
                 OutlinedTextField(answer, { answer = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("Verification code") },
                     enabled = !app.loading && bitmap != null, singleLine = true)
-                if (!challenge.guest) {
-                    SettingSwitch("Remember username", rememberUser) { rememberUser = it }
-                    SettingSwitch("Store password on this device", savePassword) { savePassword = it }
-                    if (savePassword) Text("Encrypted with Android Keystore. You must still complete FOIS verification.")
-                }
-                ActionButton(if (challenge.guest) "Submit enquiry" else "Secure sign in", !app.loading && bitmap != null) {
-                    app.submit(username, password, answer, rememberUser, savePassword)
+                ActionButton(if (challenge.guest) "Search freight" else if (reuse) "Verify and reconnect" else "Secure sign in",
+                    !app.loading && bitmap != null) {
+                    app.submit(if (reuse) app.remembered else username, if (reuse) app.storedPassword else password, answer)
                 }
                 if (!challenge.guest) {
                     TextButton(onClick = {
@@ -614,11 +665,11 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
                         Text("Remove", color = MaterialTheme.colorScheme.error)
                     }
                 }
-                EntryTile(item.name.ifBlank { query.key }, query.key + if (item.favorite) " · Favourite" else "") { app.open(query) }
+                EntryTile(item.name.ifBlank { query.key }, query.key + if (item.favorite) " · Favourite" else "") { app.openSaved(query) }
                 if (freight != null) {
                     RouteSummary(freight, query, compact = true)
                     Text("ETA · ${displayFreightTime(freight.eta)}")
-                    Text("Last reported · ${freight.get("Last reported station")}")
+                    Text("Last reported · ${freight.get("Last reported station").takeUnless { it == "Not Reported" } ?: "Not available"}")
                 }
                 if (query.isFnr) SettingSwitch("Automatic tracking", item.tracking) { app.save(item.copy(tracking = it)) }
             }
@@ -626,7 +677,7 @@ private fun SavedScreen(app: MainActivity, signedIn: Boolean) {
     }
     editing?.let { item -> SavedDialog(app, item, initialKey = draftKey) { editing = null } }
     deleting?.let { item ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Remove saved freight?") },
+        AlertDialog(properties = SecureDialog, onDismissRequest = { deleting = null }, title = { Text("Remove saved freight?") },
             text = { Text("Remove ${item.name.ifBlank { Query.fromStorage(item.key).key }} from Saved & Tracking?") },
             confirmButton = { TextButton(onClick = { app.delete(item); deleting = null }) { Text("Remove freight") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
@@ -641,7 +692,7 @@ private fun SavedDialog(app: MainActivity, item: Saved, initialKey: String = "",
     var favorite by remember { mutableStateOf(item.favorite) }
     var tracking by remember { mutableStateOf(item.tracking) }
     val query = if (item.key.isBlank()) Query.parse(key, initial.consignor.takeIf { initialKey.isNotBlank() } ?: app.consignor) else initial
-    AlertDialog(onDismissRequest = dismiss, title = { Text(if (item.key.isBlank()) "Add saved freight" else "Edit saved freight") },
+    AlertDialog(properties = SecureDialog, onDismissRequest = dismiss, title = { Text(if (item.key.isBlank()) "Add saved freight" else "Edit saved freight") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(key, { key = it.take(90) }, label = { Text("FNR or station pair") }, readOnly = item.key.isNotBlank(), singleLine = true)
@@ -652,30 +703,6 @@ private fun SavedDialog(app: MainActivity, item: Saved, initialKey: String = "",
         }, confirmButton = { TextButton(enabled = query != null, onClick = {
             query?.let { app.save(Saved(it.storageKey, name.trim(), favorite, it.isFnr && tracking)); dismiss() }
         }) { Text("Save") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
-}
-
-@Composable
-private fun History(app: MainActivity) {
-    var completed by remember { mutableStateOf(false) }
-    val results = app.history.filter { !completed || it.freight.any { item -> item.arrived != null } }
-    Feed {
-        item {
-            Panel {
-                Title("Enquiry history")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!completed, { completed = false }, { Text("All enquiries") })
-                    FilterChip(completed, { completed = true }, { Text("Completed") })
-                }
-            }
-        }
-        if (results.isEmpty()) item { Text("No matching cached enquiries.") }
-        items(results, key = { it.key }) { item ->
-            EntryTile(Query.fromStorage(item.key).key,
-                "Cached · ${displayTime(item.updated)} · ${item.freight.size} result(s)") {
-                app.open(Query.fromStorage(item.key), true)
-            }
-        }
-    }
 }
 
 @Composable
@@ -697,212 +724,84 @@ private fun ThemeChoices(selected: ThemeMode?, choose: (ThemeMode) -> Unit) {
 
 @Composable
 private fun Preferences(app: MainActivity, signedIn: Boolean) {
-    var clear by remember { mutableStateOf(false) }
-    Feed {
-        item {
+    val categories = listOf("ECBS Account", "Tracking", "Appearance and Motion", "Notifications", "Security", "Storage", "About")
+    var confirm by remember { mutableStateOf<String?>(null) }
+    var interval by remember { mutableStateOf(false) }
+    val seconds by app.services.intervalSeconds.collectAsState()
+    val section = app.settingsSection
+    if (section == "Storage") {
+        Column(Modifier.fillMaxSize()) {
+            TextButton(onClick = { confirm = "Clear cache" }) { Text("Clear offline cache and search history") }
+            Box(Modifier.weight(1f)) { SavedScreen(app, signedIn) }
+        }
+    } else Feed {
+        if (section == null) {
+            item { Title("Settings") }
+            items(categories) { category -> EntryTile(category, "") { app.settingsSection = category } }
+        } else item {
             Panel {
-                Title("Settings")
-                Label("THEME")
-                ThemeChoices(app.themeMode, app::chooseTheme)
-                Label("ECBS ACCOUNT")
-                Text(if (signedIn) "ECBS session available" else "Guest")
-                ActionButton(if (signedIn) "Sign out" else "Sign in", !app.loading) {
-                    if (signedIn) app.logout() else app.beginChallenge(false)
-                }
-                SettingSwitch("Fingerprint / biometric app lock", app.biometricEnabled) {
-                    if (it) app.authenticate(true) else app.disableBiometric()
-                }
-            }
-        }
-        item {
-            Panel {
-                Label("BACKGROUND REFRESH")
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(15L, 30L, 60L, 120L).forEach { min ->
-                        FilterChip(app.interval == min, { app.changeInterval(min) }, { Text("$min min") })
-                    }
-                }
-                Text("Android schedules background work and may delay refresh to conserve battery. Automatic checks require a valid ECBS session.")
-            }
-        }
-        item {
-            Panel {
-                Label("NOTIFICATIONS")
-                if (!app.notificationsAllowed) TextButton(onClick = app::enableNotifications) { Text("Enable notifications") }
-                Text("Set sound and vibration for each channel in Android.")
-                Alert.entries.forEach { alert ->
-                    val key = "alert_${alert.name}"
-                    var enabled by remember { mutableStateOf(app.services.settings.getBoolean(key, true)) }
-                    SettingSwitch(alert.label, enabled) {
-                        enabled = it
-                        app.services.settings.edit().putBoolean(key, it).apply()
-                    }
-                    TextButton(onClick = { app.channelSettings(alert) }) { Text("${alert.label} channel settings") }
-                }
-            }
-        }
-        item {
-            Panel {
-                Label("STORAGE")
-                TextButton(onClick = { clear = true }) { Text("Clear cache and search history") }
-                Label("ABOUT")
-                Text("FOIS Tracker ${BuildConfig.VERSION_NAME}")
-                Text("Independent application. Indian Railways does not endorse or operate this app.")
-                Text("Journey positions reflect last reported station records from FOIS.")
-            }
-        }
-    }
-    if (clear) AlertDialog(onDismissRequest = { clear = false }, title = { Text("Clear cached enquiries?") },
-        text = { Text("Previously retrieved freight and ETA history will be removed.") },
-        confirmButton = { TextButton(onClick = { clear = false; app.clearHistory() }) { Text("Clear") } },
-        dismissButton = { TextButton(onClick = { clear = false }) { Text("Cancel") } })
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FreightUi(app: MainActivity, page: ResultPage) {
-    val freight = page.freight.getOrNull(page.selected) ?: return
-    val distance = freight.values["Remaining distance"]
-    val distanceColor = if (distance != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    val distanceText = when {
-        distance == null -> "Not Reported"
-        distance.any(Char::isLetter) -> distance
-        else -> "$distance km"
-    }
-    val signedIn by app.services.signedIn.collectAsState()
-    val liveTracking by app.services.liveTracking.collectAsState()
-    val backgroundLive = liveTracking?.takeIf { it.query == page.query }
-    val active = signedIn && app.foreground && !app.locked && app.challenge == null && freight.arrived == null
-    val refreshIssue = app.refreshIssue?.takeIf { it.first == page.query }?.second
-    val polling = active && backgroundLive == null && refreshIssue == null && app.message == null && !app.loading
-    var elapsed by remember(freight.retrieved) { mutableLongStateOf(0) }
-    LaunchedEffect(freight.retrieved, app.foreground, page.cached) {
-        while (app.foreground && !page.cached) {
-            elapsed = ((System.currentTimeMillis() - freight.retrieved) / 1000).coerceAtLeast(0)
-            if (elapsed >= 60) break
-            delay(1000)
-        }
-    }
-    LaunchedEffect(page.query.storageKey, freight.retrieved, polling) {
-        if (polling) {
-            // Start the next interval after the previous request finishes.
-            delay(1_000)
-            app.refresh(page.query, automatic = true)
-        }
-    }
-    var editing by remember { mutableStateOf<Saved?>(null) }
-    val item = app.saved.find { it.key == page.query.storageKey }
-    PullToRefreshBox(isRefreshing = app.loading && !app.automaticRefresh, onRefresh = { app.refresh(page.query, notifyOnRefresh = true) }, modifier = Modifier.fillMaxSize()) {
-        Feed {
-            item {
-                Panel {
-                    Label("FNR · ${freight.fnr.ifBlank { page.query.key.takeIf { page.query.isFnr } ?: "Not Reported" }}")
-                    if (freight.arrived == null || backgroundLive != null) {
-                        ActionButton(
-                            if (backgroundLive != null) "Stop background Live" else "Keep live in background",
-                            enabled = app.challenge == null && (backgroundLive != null || !app.loading || app.automaticRefresh),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (backgroundLive != null) app.stopBackgroundLive()
-                            else if (signedIn) app.startBackgroundLive(page.query, page.freight)
-                            else app.beginChallenge(false, page.query)
+                Title(section)
+                when (section) {
+                    "ECBS Account" -> {
+                        Text(app.savedAccount ?: "No saved account")
+                        Text(if (app.hasSavedPassword) "Password · ••••••••" else "No saved password")
+                        Text("Session recovery uses saved credentials and any verification required by FOIS.")
+                        TextButton(onClick = app::changeCredentials) { Text("Change credentials") }
+                        if (app.hasSavedPassword) TextButton(onClick = { confirm = "Delete saved credentials" }) {
+                            Text("Delete saved credentials")
                         }
                     }
-                    Label(if (freight.arrived == null) "ESTIMATED ARRIVAL" else "CONFIRMED ARRIVAL")
-                    AnimatedContent(
-                        targetState = displayFreightTime(freight.arrived ?: freight.eta),
-                        transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(110)) },
-                        label = "Arrival time"
-                    ) { arrival ->
-                        Text(arrival, fontSize = 40.sp, lineHeight = 44.sp,
-                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    "Tracking" -> {
+                        TextButton(onClick = { interval = true }) { Text("Sync interval · ${intervalLabel(seconds)}") }
+                        SettingSwitch("Keep live in background", app.backgroundEnabled, app::setBackground)
+                        SettingSwitch("Start after reboot", app.startAfterReboot, app::setBootTracking)
+                        Text("Android may defer saved freight checks after reboot. Open the app to resume fast background tracking.")
                     }
-                    Label("REMAINING DISTANCE")
-                    Text(distanceText, fontSize = 34.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold, color = distanceColor)
-                    if (freight.arrived != null && freight.eta != null) Text("Last ETA · ${displayFreightTime(freight.eta)}")
-                    val previous = freightTime(freight.previousEta)
-                    val current = freightTime(freight.eta)
-                    if (freight.previousEta != null) {
-                        Text("Previous ETA · ${displayFreightTime(freight.previousEta)}")
-                        if (freight.eta != null && freight.eta != freight.previousEta) {
-                            Text("Revised ETA · ${displayFreightTime(freight.eta)}")
-                        }
-                        if (previous != null && current != null) {
-                            val minutes = Duration.between(previous, current).toMinutes()
-                            if (minutes != 0L) Text("${durationLabel(kotlin.math.abs(minutes))} ${if (minutes > 0) "later" else "earlier"}",
-                                color = if (minutes > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    if (current != null && freight.arrived == null) {
-                        val remaining = Duration.between(Instant.now(), current).toMinutes()
-                        Text(if (remaining > 0) "Estimated time remaining · ${durationLabel(remaining)}" else "Estimated arrival time has passed",
-                            color = if (remaining > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
-                    }
-                    Text("${if (page.cached) "Cached result · " else ""}${freight.source}", style = MaterialTheme.typography.labelLarge)
-                    if (backgroundLive?.paused == false || polling || app.automaticRefresh) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LiveRefreshLight()
-                            Text("Live", style = MaterialTheme.typography.labelLarge)
-                        }
-                    } else {
-                        (backgroundLive?.takeIf { it.paused }?.let { "Background Live is waiting to retry." } ?: refreshIssue)
-                            ?.let { Text(it, style = MaterialTheme.typography.labelLarge) }
-                    }
-                    if (!page.cached && elapsed < 60) Text("Updated ${elapsed}s ago", style = MaterialTheme.typography.bodySmall)
-                    Text("Last successful update · ${displayTime(freight.retrieved)}", style = MaterialTheme.typography.bodySmall)
-                    if (page.freight.size > 1) {
-                        Label("${page.freight.size} MATCHING CONSIGNMENTS")
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            page.freight.forEachIndexed { index, match ->
-                                FilterChip(index == page.selected, { app.page = page.copy(selected = index) }, {
-                                    Text(match.fnr.ifEmpty { match.values["Rake identification"] ?: "Result ${index + 1}" })
-                                })
+                    "Appearance and Motion" -> {
+                        ThemeChoices(app.themeMode, app::chooseTheme)
+                        Text("System Roboto")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(0.5f, 1f, 1.5f).forEach { speed ->
+                                FilterChip(app.motionSpeed == speed, { app.changeMotion(speed = speed) }, { Text("${speed}×") })
                             }
                         }
+                        SettingSwitch("Reduced motion", app.reducedMotion) { app.changeMotion(reduced = it) }
                     }
-                    RouteSummary(freight, page.query)
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ActionButton(if (item == null) "Save enquiry" else "Edit saved") {
-                            editing = item ?: Saved(page.query.storageKey, "", false, false)
-                        }
-                        ActionButton("Copy report") { app.copy("Freight report", Reports.text(freight)) }
-                    }
-                    if (freight.fnr.isNotBlank() && !page.query.isFnr) {
-                        TextButton(onClick = { app.open(Query(freight.fnr), true) }, enabled = !app.loading) { Text("Open FNR ${freight.fnr}") }
-                    }
-                }
-            }
-            item {
-                var details by remember(page.query.storageKey, page.selected) { mutableStateOf(true) }
-                Panel {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Freight details", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { details = !details }) { Text(if (details) "Collapse" else "Expand") }
-                    }
-                    AnimatedVisibility(visible = details,
-                        enter = expandVertically(tween(220)) + fadeIn(tween(180)),
-                        exit = shrinkVertically(tween(180)) + fadeOut(tween(120))) {
-                        Column {
-                            (fields + (freight.values.keys - fields.toSet())).distinct().forEach { field ->
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Label(field)
-                                        if (field == "Remaining distance") {
-                                            Text(distanceText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = distanceColor)
-                                        } else Text(freight.get(field))
-                                    }
-                                    if (freight.values.containsKey(field)) IconButton(onClick = { app.copy(field, freight.get(field)) }) {
-                                        Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
-                                    }
-                                }
+                    "Notifications" -> {
+                        if (!app.notificationsAllowed) TextButton(onClick = app::enableNotifications) { Text("Enable notifications") }
+                        SettingSwitch("Privacy notifications", app.privateNotifications, app::setNotificationPrivacy)
+                        Text(if (app.privateNotifications) "1 freight update received" else "New station movement · Estimated arrival",
+                            style = MaterialTheme.typography.bodySmall)
+                        Alert.entries.forEach { alert ->
+                            val key = "alert_${alert.name}"
+                            var enabled by remember { mutableStateOf(app.services.settings.getBoolean(key, alert != Alert.REFRESH)) }
+                            SettingSwitch(alert.label, enabled) {
+                                enabled = it
+                                app.services.settings.edit().putBoolean(key, it).apply()
                             }
+                            TextButton(onClick = { app.channelSettings(alert) }) { Text("${alert.label} channel settings") }
                         }
+                    }
+                    "Security" -> SettingSwitch("Fingerprint / biometric app lock", app.biometricEnabled) {
+                        if (it) app.authenticate(true) else app.disableBiometric()
+                    }
+                    "About" -> {
+                        Text("FOIS Tracker ${BuildConfig.VERSION_NAME}")
+                        Text("Native Kotlin · Jetpack Compose · Android 16")
+                        Text("Independent application. Indian Railways does not endorse or operate this app.")
                     }
                 }
             }
         }
     }
-    editing?.let { SavedDialog(app, it) { editing = null } }
+    if (interval) IntervalDialog(seconds, app::setSyncSeconds) { interval = false }
+    confirm?.let { action ->
+        AlertDialog(properties = SecureDialog, onDismissRequest = { confirm = null }, title = { Text("$action?") },
+            confirmButton = { TextButton(onClick = {
+                confirm = null
+                if (action == "Clear cache") app.clearHistory() else app.deleteCredentials()
+            }) { Text(action) } }, dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } })
+    }
 }
 
 @Composable
@@ -931,12 +830,16 @@ private fun LiveRefreshLight() {
 
 @Composable
 private fun RouteSummary(freight: Freight, query: Query, compact: Boolean = false) {
-    val origin = freight.values["Origin"] ?: query.key.substringBefore(' ').takeUnless { query.isFnr } ?: "Not Reported"
-    val destination = freight.values["Destination"] ?: query.key.substringAfter(' ').takeUnless { query.isFnr } ?: "Not Reported"
+    val origin = freight.values["Origin"] ?: query.key.substringBefore(' ').takeUnless { query.isFnr } ?: "Not available"
+    val destination = freight.values["Destination"] ?: query.key.substringAfter(' ').takeUnless { query.isFnr } ?: "Not available"
     if (!compact) Label("ROUTE SUMMARY")
     Text("$origin → $destination", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     if (!compact) {
-        Text("Last reported station · ${freight.get("Last reported station")}")
+        listOf("Origin" to origin, "Destination" to destination).forEach { (name, station) ->
+            val expanded = reportedStationLabel(station, freight.journey)
+            if (expanded != station) Text("$name · $expanded", style = MaterialTheme.typography.bodySmall)
+        }
+        Text("Last reported station · ${freight.get("Last reported station").takeUnless { it == "Not Reported" } ?: "Not available"}")
         freight.values["Freight status"]?.let { Text("Status · $it") }
         freight.values["Consignment detail"]?.let { Text("Consignment detail · $it") }
     }
@@ -946,4 +849,246 @@ private fun durationLabel(minutes: Long): String = when {
     minutes >= 1440 -> "${minutes / 1440}d ${(minutes % 1440) / 60}h"
     minutes >= 60 -> "${minutes / 60}h ${minutes % 60}m"
     else -> "${minutes}m"
+}
+
+private val intervalPresets = listOf(0L, 1L, 5L, 10L, 15L, 30L, 60L, 120L, 300L, 600L, 900L)
+
+private fun intervalLabel(seconds: Long) = when {
+    seconds < 60 -> "$seconds sec"
+    seconds % 60 == 0L -> "${seconds / 60} min"
+    else -> "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
+private fun IntervalDialog(seconds: Long, set: (Long) -> Unit, close: () -> Unit) {
+    var selected by remember { mutableLongStateOf(seconds) }
+    AlertDialog(properties = SecureDialog, onDismissRequest = close,
+        title = { Text("Sync interval") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(intervalLabel(selected), style = MaterialTheme.typography.titleLarge.merge(numberStyle))
+                Slider(selected.toFloat(), { selected = it.toLong() }, valueRange = 0f..900f, steps = 899)
+                intervalPresets.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { value ->
+                            FilterChip(selected == value, { selected = value }, { Text(intervalLabel(value)) })
+                        }
+                    }
+                }
+                Text("At 0 sec, each request starts after the previous one finishes. Server limits and Android background restrictions still apply.")
+            }
+        },
+        confirmButton = { TextButton(onClick = { set(selected); close() }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = close) { Text("Cancel") } })
+}
+
+@Composable
+private fun TrackingToolbar(app: MainActivity, signedIn: Boolean) {
+    val seconds by app.services.intervalSeconds.collectAsState()
+    val running = app.trackingEnabled
+    val live = running && signedIn && app.page?.freight?.any { it.source != "Public FNR" && it.arrived == null } == true &&
+        app.refreshIssue == null
+    var intervalOpen by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    Surface(color = colors.surface, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(.76f).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center) {
+                if (live && LocalMotionScale.current != 0f) LiveRefreshLight()
+                Text(if (live) "LIVE" else "IDLE", Modifier.padding(start = 3.dp), maxLines = 1,
+                    fontSize = 11.sp, color = if (live) if (LocalDarkAppearance.current) liveGreen else Color(0xFF08754C)
+                    else colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            }
+            ToolButton(if (app.backgroundEnabled) "BG ON" else "BG OFF", Modifier.weight(1f),
+                if (app.backgroundEnabled) colors.primaryContainer else colors.surfaceVariant, colors.onSurface) {
+                app.setBackground(!app.backgroundEnabled)
+            }
+            ToolButton(intervalLabel(seconds), Modifier.weight(1.22f), colors.surfaceVariant, colors.onSurface, true) { intervalOpen = true }
+            ToolButton(if (running) "■ Stop" else "▶ Start", Modifier.weight(1f),
+                if (running) (if (LocalDarkAppearance.current) colors.error else Color(0xFFB02434)) else actionBlue,
+                if (running && LocalDarkAppearance.current) Color(0xFF101318) else Color.White) { app.setTracking(!running) }
+        }
+    }
+    if (intervalOpen) IntervalDialog(seconds, app::setSyncSeconds) { intervalOpen = false }
+}
+
+@Composable
+private fun ToolButton(label: String, modifier: Modifier, background: Color, foreground: Color,
+                       dropdown: Boolean = false, click: () -> Unit) {
+    val interactions = remember { MutableInteractionSource() }
+    val pressed by interactions.collectIsPressedAsState()
+    val motion = LocalMotionScale.current
+    val scale by animateFloatAsState(if (pressed && motion > 0f) .98f else 1f, tween((145 * motion).toInt()), label = "Toolbar")
+    Surface(onClick = click, interactionSource = interactions, color = background, contentColor = foreground,
+        shape = RoundedCornerShape(14.dp), modifier = modifier.height(48.dp).graphicsLayer { scaleX = scale; scaleY = scale }) {
+        Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = numberStyle,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            if (dropdown) Icon(Icons.Default.ArrowDropDown, "Change sync interval", Modifier.size(15.dp))
+        }
+    }
+}
+
+private val quickFields = listOf("Locomotive number", "Locomotive type", "Load type", "Consignor", "Commodity", "Freight status")
+
+private fun Freight.reported(field: String) = values[field]?.takeIf { it.isNotBlank() } ?: "Not available"
+
+private fun bookmarkKey(page: ResultPage, freight: Freight) =
+    if (page.freight.size > 1 && freight.fnr.matches(Regex("[0-9]{11}"))) Query(freight.fnr).storageKey else page.query.storageKey
+
+@Composable
+private fun Bookmark(app: MainActivity, page: ResultPage, freight: Freight) {
+    val key = bookmarkKey(page, freight)
+    val saved = app.saved.firstOrNull { it.key == key }
+    IconButton(onClick = {
+        if (saved == null) app.save(Saved(key, "", true, false)) else app.delete(saved)
+    }) { Icon(Icons.Default.Star, if (saved == null) "Bookmark freight" else "Remove bookmark",
+        tint = if (saved == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary) }
+}
+
+@Composable
+private fun FreightCard(app: MainActivity, page: ResultPage, index: Int) {
+    val freight = page.freight[index]
+    var expanded by rememberSaveable { mutableStateOf(true) }
+    var options by remember { mutableStateOf(false) }
+    val motion = LocalMotionScale.current
+    val open = { app.openDetails(page, index) }
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable(role = Role.Button, onClick = open)) {
+                Text(freight.fnr.ifBlank { "FNR not available" }, Modifier.sharedFreightNumber(page, index), style = MaterialTheme.typography.headlineSmall.merge(numberStyle),
+                    fontWeight = FontWeight.Bold)
+                Text("Rake · ${freight.reported("Rake identification")}", style = MaterialTheme.typography.bodyMedium)
+                Text("Loading · ${freight.reported("Loading date")}", style = MaterialTheme.typography.bodySmall)
+            }
+            Bookmark(app, page, freight)
+            IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Freight actions") }
+        }
+        Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = open), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            EtaPanel(freight)
+            Movement(freight, page.query)
+        }
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "Hide freight details" else "Show freight details")
+            Icon(Icons.Default.ArrowDropDown, null)
+        }
+        AnimatedVisibility(expanded, enter = expandVertically(tween((250 * motion).toInt())),
+            exit = shrinkVertically(tween((230 * motion).toInt()))) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                quickFields.filterNot { it == "Freight status" }.forEach { field -> Text("$field · ${freight.reported(field)}") }
+            }
+        }
+        TextButton(onClick = open) { Text("Open full details") }
+        Text("${if (page.cached) "Cached · " else ""}Last updated · ${displayTime(freight.retrieved)}",
+            style = MaterialTheme.typography.bodySmall)
+        app.refreshIssue?.takeIf { it.first == page.query }?.let { Text(it.second, style = MaterialTheme.typography.bodySmall) }
+    }
+    if (options) AlertDialog(properties = SecureDialog, onDismissRequest = { options = false },
+        title = { Text("Freight actions") }, text = {
+            Column {
+                TextButton(onClick = { options = false; app.copy("Freight report", Reports.text(freight)) }) { Text("Copy report") }
+                TextButton(onClick = { options = false; app.refresh(page.query, notifyOnRefresh = true) }) { Text("Refresh freight") }
+                if (!page.query.isFnr && freight.fnr.matches(Regex("[0-9]{11}"))) {
+                    TextButton(onClick = { options = false; app.enquire(Query(freight.fnr)) }) { Text("Open FNR enquiry") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { options = false }) { Text("Done") } })
+}
+
+@Composable
+private fun EtaPanel(freight: Freight) {
+    val colors = MaterialTheme.colorScheme
+    val motion = LocalMotionScale.current
+    Surface(color = colors.primaryContainer, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Label(if (freight.arrived == null) "REVISED ETA" else "CONFIRMED ARRIVAL")
+            AnimatedContent(freight.arrived ?: freight.eta, transitionSpec = {
+                fadeIn(tween((400 * motion).toInt())) togetherWith fadeOut(tween((170 * motion).toInt()))
+            }, label = "Arrival") {
+                Text(it?.let(::displayFreightTime) ?: "Not available", style = MaterialTheme.typography.headlineMedium.merge(numberStyle),
+                    fontWeight = FontWeight.Bold, color = colors.primary)
+            }
+            if (freight.arrived != null) Text("Last ETA · ${freight.eta?.let(::displayFreightTime) ?: "Not available"}")
+            Text("Previous ETA · ${freight.previousEta?.let(::displayFreightTime) ?: "Not available"}",
+                style = MaterialTheme.typography.bodyMedium.merge(numberStyle))
+            val previous = freightTime(freight.previousEta)
+            val revised = freightTime(freight.eta)
+            if (previous != null && revised != null) {
+                val minutes = Duration.between(previous, revised).toMinutes()
+                Text(when {
+                    minutes > 0 -> "${durationLabel(minutes)} later"
+                    minutes < 0 -> "${durationLabel(-minutes)} earlier"
+                    else -> "ETA unchanged"
+                }, color = when {
+                    minutes > 0 -> colors.error
+                    minutes < 0 -> if (LocalDarkAppearance.current) liveGreen else Color(0xFF08754C)
+                    else -> colors.onSurfaceVariant
+                }, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Movement(freight: Freight, query: Query) {
+    val distance = freight.values["Remaining distance"]
+    RouteSummary(freight, query)
+    Label("REMAINING DISTANCE")
+    Text(distance?.let { if (it.any(Char::isLetter)) it else "$it km" } ?: "Not available",
+        style = MaterialTheme.typography.headlineMedium.merge(numberStyle), fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.error)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FreightUi(app: MainActivity, page: ResultPage) {
+    val freight = page.freight.getOrNull(page.selected) ?: return
+    val pager = rememberPagerState(initialPage = app.detailsTab) { 3 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager.currentPage) { app.detailsTab = pager.currentPage }
+    val motion = LocalMotionScale.current
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(freight.fnr.ifBlank { "Freight details" }, Modifier.weight(1f).sharedFreightNumber(page, page.selected),
+                style = MaterialTheme.typography.titleLarge.merge(numberStyle), fontWeight = FontWeight.Bold)
+            Bookmark(app, page, freight)
+            IconButton(onClick = { app.copy("Freight report", Reports.text(freight)) }) {
+                Icon(painterResource(R.drawable.ic_clipboard), "Copy complete freight report")
+            }
+        }
+        PrimaryTabRow(selectedTabIndex = pager.currentPage) {
+            listOf("Movement", "ETA", "Details").forEachIndexed { index, label ->
+                Tab(selected = pager.currentPage == index, onClick = { scope.launch { pager.animateScrollToPage(index, animationSpec = tween((265 * motion).toInt())) } },
+                    text = { Text(label) })
+            }
+        }
+        PullToRefreshBox(isRefreshing = app.loading && !app.automaticRefresh,
+            onRefresh = { app.refresh(page.query, notifyOnRefresh = true) }, modifier = Modifier.weight(1f)) {
+            HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) { section ->
+                Feed {
+                    item {
+                        when (section) {
+                            0 -> Panel { Movement(freight, page.query) }
+                            1 -> Panel { EtaPanel(freight) }
+                            else -> Panel {
+                                (fields + quickFields + freight.values.keys).distinct().forEach { field ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) { Label(field); Text(freight.reported(field)) }
+                                        freight.values[field]?.let { value ->
+                                            IconButton(onClick = { app.copy(field, value) }) {
+                                                Icon(painterResource(R.drawable.ic_clipboard), "Copy $field")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Text("${if (page.cached) "Cached · " else ""}Last updated · ${displayTime(freight.retrieved)}") }
+                }
+            }
+        }
+    }
 }

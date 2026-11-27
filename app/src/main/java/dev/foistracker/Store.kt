@@ -23,15 +23,34 @@ import javax.crypto.spec.GCMParameterSpec
 data class Saved(val key: String, val name: String, val favorite: Boolean, val tracking: Boolean)
 data class Entry(val key: String, val freight: List<Freight>, val updated: Long)
 
-class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 1) {
+class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 2) {
     val changes = MutableStateFlow(0)
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE saved (query TEXT PRIMARY KEY, name TEXT NOT NULL, favorite INTEGER NOT NULL, tracking INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE enquiry (query TEXT PRIMARY KEY, results TEXT NOT NULL, updated INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE eta (fnr TEXT NOT NULL, eta TEXT NOT NULL, observed INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE recent_removed (query TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE alerts (query TEXT NOT NULL, category TEXT NOT NULL, fingerprint TEXT NOT NULL, sent INTEGER NOT NULL, PRIMARY KEY(query,category,fingerprint))")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("CREATE TABLE recent_removed (query TEXT PRIMARY KEY)")
+        }
+    }
+
+    fun recent(): List<Entry> = entries(null).filterNot { it.key in removedRecents() }
+    private fun removedRecents(): Set<String> = readableDatabase.rawQuery("SELECT query FROM recent_removed", null).use { cursor ->
+        buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) }
+    }
+    fun removeRecent(key: String) {
+        writableDatabase.insertWithOnConflict("recent_removed", null, ContentValues().apply { put("query", key) },
+            SQLiteDatabase.CONFLICT_IGNORE)
+        changed()
+    }
+    fun restoreRecent(key: String) {
+        writableDatabase.delete("recent_removed", "query=?", arrayOf(key))
+        changed()
+    }
     private fun changed() { changes.update { it + 1 } }
 
     fun saved(): List<Saved> = readableDatabase.rawQuery("SELECT query,name,favorite,tracking FROM saved ORDER BY favorite DESC,name COLLATE NOCASE,query", null).use { cursor ->
@@ -72,24 +91,35 @@ class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 1)
         val updated = try {
             val old = cached(key)
             val results = result.map { row ->
-                val previous = if (row.fnr.isNotEmpty()) old.find { it.fnr == row.fnr } else old.find {
-                    it.get("Rake identification") == row.get("Rake identification") &&
+                val previous = if (row.fnr.isNotEmpty()) old.find { it.fnr == row.fnr && it.source == row.source } else old.find {
+                    it.source == row.source && it.get("Rake identification") == row.get("Rake identification") &&
                         row.values.containsKey("Rake identification")
                 }
-                val lastEta = row.fnr.takeIf(String::isNotEmpty)?.let { fnr ->
+                val etaKey = if (row.source == "Public FNR") "public:${row.fnr}" else row.fnr
+                val lastEta = etaKey.takeIf { row.fnr.isNotEmpty() }?.let { fnr ->
                     db.rawQuery("SELECT eta FROM eta WHERE fnr=? ORDER BY rowid DESC LIMIT 1", arrayOf(fnr))
                         .use { if (it.moveToFirst()) it.getString(0) else null }
                 } ?: previous?.eta
                 if (row.fnr.isNotEmpty() && row.eta != null && row.eta != lastEta) {
                     db.insertOrThrow("eta", null, ContentValues().apply {
-                        put("fnr", row.fnr); put("eta", row.eta); put("observed", row.retrieved)
+                        put("fnr", etaKey); put("eta", row.eta); put("observed", row.retrieved)
                     })
                 }
-                val previousEta = if (row.eta != lastEta) lastEta else previous?.previousEta
+                val previousEta = when {
+                    row.eta == null -> previous?.previousEta
+                    row.eta != lastEta -> lastEta
+                    previous?.previousEta != null -> previous.previousEta
+                    row.fnr.isNotEmpty() -> db.rawQuery(
+                        "SELECT eta FROM eta WHERE fnr=? AND eta<>? ORDER BY rowid DESC LIMIT 1",
+                        arrayOf(etaKey, row.eta!!)
+                    ).use { if (it.moveToFirst()) it.getString(0) else null }
+                    else -> null
+                }
                 val knownDetails = if (row.fnr.isNotEmpty()) previous?.values.orEmpty().filterKeys {
                     it in retainedDetailFields
                 } else emptyMap()
-                row.copy(values = knownDetails + row.values, previousEta = previousEta,
+                val retainedEta = lastEta?.takeIf { row.eta == null }?.let { mapOf("Expected arrival" to it) }.orEmpty()
+                row.copy(values = knownDetails + retainedEta + row.values, previousEta = previousEta,
                     journey = row.journey.ifEmpty { previous?.journey.orEmpty() })
             }
             db.insertWithOnConflict("enquiry", null, ContentValues().apply {
@@ -107,6 +137,7 @@ class Store(context: Context) : SQLiteOpenHelper(context, "freight.db", null, 1)
         try {
             writableDatabase.delete("enquiry", null, null)
             writableDatabase.delete("eta", null, null)
+            writableDatabase.delete("recent_removed", null, null)
             writableDatabase.setTransactionSuccessful()
         } finally { writableDatabase.endTransaction() }
         changed()
@@ -190,6 +221,21 @@ class Services private constructor(context: Context) {
     val signedIn = MutableStateFlow(cookies.all().isNotEmpty())
     val client = FoisClient(cookies)
     val networkLock = Mutex()
+    val intervalSeconds = MutableStateFlow(settings.getLong("metro_interval_seconds", 1).coerceIn(0, 900))
+    val recovery = MutableStateFlow(settings.getString("metro_recovery_query", null)?.let(Query::fromStorage))
+
+    fun clearRecovery() {
+        settings.edit().remove("metro_recovery_query").apply()
+        recovery.value = null
+    }
+
+    fun markExpired(query: Query) {
+        forgetSession()
+        if (!settings.getBoolean("signed_out", false) && vault.get("username") != null && vault.get("password") != null) {
+            settings.edit().putString("metro_recovery_query", query.storageKey).apply()
+            recovery.value = query
+        }
+    }
     fun persistSession() {
         val list = cookies.all()
         vault.put("session", list.takeIf { it.isNotEmpty() }?.let { JSONArray(it.map(Cookie::toString)).toString() })

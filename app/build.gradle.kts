@@ -18,8 +18,8 @@ android {
         applicationId = "org.railtracker.fois"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0.9"
+        versionCode = 12
+        versionName = "1.0.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     if (hasReleaseSigning) {
@@ -30,6 +30,11 @@ android {
             keyPassword = releaseKeyPassword
         }
         buildTypes.getByName("release").signingConfig = signingConfigs.getByName("foisRelease")
+    }
+    buildTypes.getByName("release") {
+        isMinifyEnabled = true
+        isShrinkResources = true
+        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {

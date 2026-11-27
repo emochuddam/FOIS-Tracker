@@ -63,8 +63,19 @@ object Tracking {
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork("freight-refresh", ExistingPeriodicWorkPolicy.UPDATE, request)
     }
+    fun noteAppOpened(context: Context, services: Services) {
+        services.settings.edit().putInt("opened_boot_count", bootCount(context)).apply()
+    }
+    private fun bootCount(context: Context): Int = android.provider.Settings.Global.getInt(
+        context.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1
+    )
+    fun canRunAfterBoot(context: Context, services: Services): Boolean =
+        services.settings.getBoolean("metro_boot", false) ||
+            services.settings.getInt("opened_boot_count", -2) == bootCount(context)
+
     fun sync(context: Context, services: Services) {
-        if (services.store.saved().any { it.tracking }) schedule(context, services.settings.getLong("interval", 15))
+        if (!services.settings.getBoolean("signed_out", false) &&
+            services.settings.getBoolean("metro_tracking", true) && services.store.saved().any { it.tracking }) schedule(context, services.settings.getLong("interval", 15))
         else WorkManager.getInstance(context).cancelUniqueWork("freight-refresh")
     }
     fun channel(context: Context, alert: Alert): String {
@@ -91,19 +102,23 @@ object Tracking {
     }
 
     fun notify(context: Context, services: Services, key: String, alert: Alert, text: String, fingerprint: String = text) {
-        if (!services.settings.getBoolean("alert_${alert.name}", true)) return
+        if (!services.settings.getBoolean("alert_${alert.name}", alert != Alert.REFRESH)) return
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         val channel = channel(context, alert)
         if (manager.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE) return
         if (!services.store.registerAlert(key, alert.name, fingerprint)) return
+        val privateMode = services.settings.getBoolean("notification_privacy", false)
+        val visible = if (privateMode) "1 freight update received" else text
         val id = "$key-${alert.name}".hashCode()
         val intent = Intent(context, MainActivity::class.java).putExtra("enquiry", key).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(id, NotificationCompat.Builder(context, channel)
-            .setSmallIcon(R.drawable.ic_rail).setContentTitle(alert.label).setContentText(text.lineSequence().first())
-            .setSubText(Query.fromStorage(key).key).setStyle(NotificationCompat.BigTextStyle().bigText(text)).setContentIntent(pending).setAutoCancel(true).build())
+            .setSmallIcon(R.drawable.ic_rail).setContentTitle(if (privateMode) null else alert.label).setContentText(visible.lineSequence().first())
+            .setSubText(if (privateMode) null else Query.fromStorage(key).key)
+            .setVisibility(if (privateMode) NotificationCompat.VISIBILITY_SECRET else NotificationCompat.VISIBILITY_PRIVATE)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(visible)).setContentIntent(pending).setAutoCancel(true).build())
     }
 }
 
@@ -112,6 +127,8 @@ class FreightWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     private suspend fun refreshTrackedFreight(): Result {
         val services = Services.get(applicationContext)
+        if (services.settings.getBoolean("signed_out", false) || !Tracking.canRunAfterBoot(applicationContext, services))
+            return Result.success()
         val items = services.store.saved().filter { it.tracking }
         if (items.isEmpty()) return Result.success()
         var retry = false
@@ -133,7 +150,7 @@ class FreightWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     if (next.arrived != null) services.store.pause(item.key)
                     services.store.clearAlert(item.key, Alert.ERROR.name)
                 } catch (_: FoisError.Authentication) {
-                    services.forgetSession()
+                    services.markExpired(Query.fromStorage(item.key))
                     Tracking.notify(applicationContext, services, item.key, Alert.SESSION, "Sign in to continue background tracking.")
                     return Result.success()
                 } catch (_: IOException) {

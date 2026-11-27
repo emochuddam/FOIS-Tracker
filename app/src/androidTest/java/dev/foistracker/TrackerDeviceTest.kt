@@ -33,6 +33,7 @@ class TrackerDeviceTest {
 
     @Test fun savesThemeChoiceAcrossActivityRecreation() {
         compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText("Appearance and Motion").performClick()
         compose.onNodeWithText("Dark").performClick()
         compose.runOnIdle { assertEquals(ThemeMode.DARK, compose.activity.themeMode) }
         compose.activityRule.scenario.recreate()
@@ -43,12 +44,11 @@ class TrackerDeviceTest {
     }
 
     @Test fun validatesFromHomeAndSearch() {
-        compose.onNodeWithText("FNR or station pair").performTextInput("123")
         compose.onNodeWithText("Search freight").performClick()
-        compose.onNodeWithText("Enter an 11-digit FNR or two different station codes, such as RMN CFS.").assertIsDisplayed()
-        compose.onNodeWithText("Search").performClick()
+        compose.onNodeWithText("FNR enquiry").performClick()
+        compose.onNodeWithText("11-digit FNR").performTextInput("123")
         compose.onNodeWithText("Search freight").performClick()
-        compose.onNodeWithText("Enter an 11-digit FNR or two different station codes, such as RMN CFS.").assertIsDisplayed()
+        compose.onNodeWithText("Enter exactly 11 digits for the FNR.").assertIsDisplayed()
     }
 
     @Test fun displaysFreightNumberAndOpensDetailsByDefault() {
@@ -58,14 +58,13 @@ class TrackerDeviceTest {
                 listOf(Freight(mapOf("FNR" to fnr, "Remaining distance" to "415", "Origin" to "RMN", "Destination" to "CFS",
                     "Last reported station" to "KOHL"))), true)
         }
-        compose.onNodeWithText("FNR · $fnr").assertIsDisplayed()
-        compose.onAllNodesWithText("415 km")[0].assertIsDisplayed()
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("RMN → CFS"))
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(fnr))
+        compose.onNodeWithText(fnr).assertExists()
+        compose.onNodeWithText(fnr).performClick()
+        compose.onNodeWithText("Movement").assertIsDisplayed()
+        compose.onNodeWithText("415 km").assertIsDisplayed()
         compose.onNodeWithText("RMN → CFS").assertIsDisplayed()
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Last reported station · KOHL (KOHLI)"))
         compose.onNodeWithText("Last reported station · KOHL (KOHLI)").assertIsDisplayed()
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Collapse"))
-        compose.onNodeWithText("Collapse").assertIsDisplayed()
     }
 
     @Test fun unavailableAutomaticRefreshStaysInline() {
@@ -78,12 +77,15 @@ class TrackerDeviceTest {
             assertNull(app.message)
             assertTrue(app.refreshIssue?.second.orEmpty().startsWith("Live refresh paused"))
         }
-        compose.onNodeWithText("Live refresh paused", substring = true).assertIsDisplayed()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Live refresh paused", substring = true))
+        compose.onNodeWithText("Live refresh paused", substring = true).assertExists()
     }
 
     @Test fun addSavedFreightPrefillsTheEnteredNumber() {
         val fnr = "01234567890"
-        compose.onNodeWithText("Tracking").performClick()
+        compose.onNodeWithText("Settings").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Storage"))
+        compose.onNodeWithText("Storage").performClick()
         compose.onNodeWithText("Find saved freight").performTextInput(fnr)
         compose.onNodeWithText("Add saved freight").performClick()
         compose.onNodeWithText("FNR or station pair").assertTextContains(fnr)
@@ -96,7 +98,9 @@ class TrackerDeviceTest {
         val store = compose.activity.services.store
         store.save(item)
         try {
-            compose.onNodeWithText("Tracking").performClick()
+            compose.onNodeWithText("Settings").performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Storage"))
+        compose.onNodeWithText("Storage").performClick()
             compose.onNodeWithText("Find saved freight").performTextInput(item.key)
             compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Remove"))
             compose.onNodeWithText("Remove").performClick()
@@ -111,6 +115,7 @@ class TrackerDeviceTest {
         Store(context).use { first ->
             first.save(Saved(key, "Fixture freight", true, true))
             first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 12:00", "Origin" to "RMN"))))
+            first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 14:00"))))
             first.record(key, listOf(Freight(mapOf("FNR" to key, "Expected arrival" to "24-11-2026 14:00"))))
             assertTrue(first.registerAlert(key, "TEST", "fixture"))
             assertFalse(first.registerAlert(key, "TEST", "fixture"))
@@ -127,11 +132,20 @@ class TrackerDeviceTest {
         }
     }
 
-    @Test fun backgroundLiveActionIsVisibleOnGuestResults() {
+    @Test fun secureWindowAndTrackingToolbarAreEnabled() {
         val fnr = "01234567890"
         compose.runOnIdle {
-            compose.activity.page = ResultPage(Query(fnr), listOf(Freight(mapOf("FNR" to fnr))), true)
+            val activity = compose.activity
+            assertTrue(activity.window.attributes.flags and android.view.WindowManager.LayoutParams.FLAG_SECURE != 0)
+            activity.page = ResultPage(Query(fnr), listOf(Freight(mapOf("FNR" to fnr))), true)
         }
-        compose.onNodeWithText("Keep live in background").assertIsDisplayed()
+        compose.onNodeWithText("BG OFF").assertIsDisplayed()
+        compose.onNodeWithText("1 sec").performClick()
+        compose.onNodeWithText("15 min").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.runOnIdle {
+            assertEquals(900L, compose.activity.services.intervalSeconds.value)
+            compose.activity.setSyncSeconds(1L)
+        }
     }
 }

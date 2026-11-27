@@ -61,6 +61,7 @@ sealed class FoisError(message: String) : IOException(message) {
     class Format : FoisError("FOIS returned an unrecognized response. Try again later.")
     class Empty : FoisError("FOIS found no matching consignments.")
     class AccessDenied : FoisError("FOIS refused this enquiry. Your saved session was kept. Try again later.")
+    class Throttled(val retryMillis: Long) : FoisError("FOIS asked the app to wait before retrying.")
     class Unavailable : FoisError("FOIS is unavailable. Try again later.")
 }
 
@@ -299,12 +300,15 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
     private val publicPage = "FOISWebPortal/pages/FWP_FNREnq.jsp"
     private val router = "ecbs/RouterServlet"
     private val home = "ecbs/JSP/HomeLinks.jsp"
+    @Volatile private var retryUntil = 0L
     private var loginTimestamp: String? = null
     private fun today() = LocalDate.now(ist).format(DateTimeFormatter.ofPattern("dd-MM-uuuu"))
 
     private fun request(path: String, query: Map<String, String> = emptyMap(), form: Map<String, String>? = null,
         referer: String? = null, ajax: Boolean = false, public: Boolean = false,
         stationDirectory: Boolean = false): ByteArray {
+        val remaining = retryUntil - System.currentTimeMillis()
+        if (remaining > 0) throw FoisError.Throttled(remaining)
         var url = requireNotNull(root.resolve(path)).newBuilder().apply {
             query.forEach { (key, value) -> addQueryParameter(key, value) }
         }.build()
@@ -331,6 +335,18 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
                 } else {
                     if (!public && response.code == 401) throw FoisError.Authentication()
                     if (!public && response.code == 403) throw FoisError.AccessDenied()
+                    val retryAfter = response.header("Retry-After")
+                    if (response.code == 429 || response.code == 503 && retryAfter != null) {
+                        val now = System.currentTimeMillis()
+                        val wait = retryAfter?.toLongOrNull()?.coerceIn(1, Long.MAX_VALUE / 1000 - now / 1000)?.times(1000)
+                            ?: retryAfter?.let { value -> runCatching {
+                                java.time.ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)
+                                    .toInstant().toEpochMilli() - now
+                            }.getOrNull() } ?: 30_000
+                        val delay = wait.coerceAtLeast(1000)
+                        retryUntil = now + delay
+                        throw FoisError.Throttled(delay)
+                    }
                     if (!response.isSuccessful) throw FoisError.Unavailable()
                     val body = response.body ?: throw FoisError.Format()
                     val source = body.source()

@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.first
 import java.io.IOException
 
 data class LiveTrackingState(val query: Query, val paused: Boolean = false)
@@ -30,7 +31,20 @@ class LiveTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == UPDATE_NOTIFICATION) {
+            val active = services.liveTracking.value
+            if (active != null) scope.launch {
+                val rows = withContext(Dispatchers.IO) { services.store.cached(active.query.storageKey) }
+                if (services.liveTracking.value?.query == active.query) {
+                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID,
+                        notification(active.query, active.paused, notificationArrivals(rows)))
+                }
+            } else stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (intent?.action == STOP) {
+            services.settings.edit().putBoolean("metro_tracking", false).apply()
+            androidx.work.WorkManager.getInstance(this).cancelUniqueWork("freight-refresh")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -44,7 +58,7 @@ class LiveTrackingService : Service() {
 
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Background live tracking", NotificationManager.IMPORTANCE_LOW))
-        var arrival = intent?.getStringExtra(ARRIVAL) ?: notificationArrivals(emptyList())
+        var arrival = intent.getStringExtra(ARRIVAL) ?: notificationArrivals(emptyList())
         try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(query, false, arrival),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -56,9 +70,9 @@ class LiveTrackingService : Service() {
         tracking?.cancel()
         services.liveTracking.value = LiveTrackingState(query)
         tracking = scope.launch {
+            var failures = 0
             try {
                 while (isActive) {
-                    // Keep the CPU available for the requested live cadence while the screen is off.
                     wakeLock.acquire(60_000)
                     val (arrived, latestArrival) = try {
                         withContext(Dispatchers.IO) {
@@ -68,7 +82,7 @@ class LiveTrackingService : Service() {
                                 val rows = try {
                                     services.client.enquiry(query)
                                 } catch (error: FoisError.Authentication) {
-                                    services.forgetSession()
+                                    services.markExpired(query)
                                     throw error
                                 }
                                 ensureActive()
@@ -86,23 +100,34 @@ class LiveTrackingService : Service() {
                             Tracking.notify(this@LiveTrackingService, services, query.storageKey, Alert.SESSION,
                                 "Sign in to ECBS to resume live tracking.")
                         }
-                        break
-                    } catch (_: IOException) {
+                        if (services.recovery.value == null) break
+                        services.liveTracking.value = LiveTrackingState(query, paused = true)
+                        manager.notify(NOTIFICATION_ID, notification(query, true, arrival))
+                        if (wakeLock.isHeld) wakeLock.release()
+                        services.signedIn.first { it }
+                        continue
+                    } catch (error: IOException) {
                         if (services.liveTracking.value?.paused != true) {
                             services.liveTracking.value = LiveTrackingState(query, paused = true)
                             manager.notify(NOTIFICATION_ID, notification(query, true, arrival))
                         }
                         if (wakeLock.isHeld) wakeLock.release()
-                        delay(30_000)
+                        failures = (failures + 1).coerceAtMost(6)
+                        delay(maxOf(1000L shl failures, (error as? FoisError.Throttled)?.retryMillis ?: 0))
                         continue
                     }
                     if (arrived) break
+                    if (wakeLock.isHeld && services.intervalSeconds.value >= 15) wakeLock.release()
                     if (services.liveTracking.value?.paused == true || latestArrival != arrival) {
                         arrival = latestArrival
                         services.liveTracking.value = LiveTrackingState(query)
                         manager.notify(NOTIFICATION_ID, notification(query, false, arrival))
                     }
-                    delay(1_000)
+                    failures = 0
+                    val started = android.os.SystemClock.elapsedRealtime()
+                    while (isActive && android.os.SystemClock.elapsedRealtime() <
+                        started + services.intervalSeconds.value * 1000) delay(250)
+                    yield()
                 }
             } finally {
                 if (isActive) stopSelf()
@@ -130,20 +155,25 @@ class LiveTrackingService : Service() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP), flags)
         val stop = PendingIntent.getService(this, NOTIFICATION_ID,
             Intent(this, LiveTrackingService::class.java).setAction(STOP), flags)
+        val privacy = services.settings.getBoolean("notification_privacy", false)
+        val body = if (privacy) "1 freight update received" else if (paused) "Waiting to retry\n$arrival" else arrival
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_rail)
-            .setContentTitle("FOIS Tracker • Live")
-            .setSubText(query.key)
-            .setContentText(if (paused) "Waiting to retry · ${arrival.lineSequence().first()}" else arrival.lineSequence().first())
-            .setStyle(NotificationCompat.BigTextStyle().bigText(if (paused) "Waiting to retry\n$arrival" else arrival))
+            .setContentTitle(if (privacy) null else "FOIS Tracker • Live")
+            .setSubText(if (privacy) null else query.key)
+            .setContentText(body.lineSequence().first())
+            .setVisibility(if (privacy) NotificationCompat.VISIBILITY_SECRET else NotificationCompat.VISIBILITY_PRIVATE)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .addAction(0, "Stop", stop)
+            .addAction(0, "Open app", open)
+            .addAction(0, "Stop tracking", stop)
             .build()
     }
 
     companion object {
+        const val UPDATE_NOTIFICATION = "dev.foistracker.UPDATE_LIVE_NOTIFICATION"
         const val QUERY = "live_query"
         const val ARRIVAL = "live_arrival"
         private const val STOP = "dev.foistracker.STOP_LIVE"

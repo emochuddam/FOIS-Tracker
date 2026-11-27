@@ -42,7 +42,26 @@ data class ResultPage(val query: Query, val freight: List<Freight>, val cached: 
 class MainActivity : FragmentActivity() {
     internal val services by lazy { Services.get(this) }
     internal var tab by mutableIntStateOf(0)
+    internal var searching by mutableStateOf(false)
+    internal var searchDraft by mutableStateOf<Query?>(null)
+    internal var detailsOpen by mutableStateOf(false)
+    internal var detailsTab by mutableIntStateOf(0)
+    internal var settingsSection by mutableStateOf<String?>(null)
+    internal var trackingEnabled by mutableStateOf(true)
+    internal var backgroundEnabled by mutableStateOf(false)
+    internal var startAfterReboot by mutableStateOf(false)
+    internal var privateNotifications by mutableStateOf(false)
+    internal var reducedMotion by mutableStateOf(false)
+    internal var motionSpeed by mutableFloatStateOf(1f)
+    internal var savedAccount by mutableStateOf<String?>(null)
+    internal var hasSavedPassword by mutableStateOf(false)
+    internal var signedOut by mutableStateOf(false)
+    internal var recents by mutableStateOf(emptyList<Entry>())
+    private var foregroundRefresh: Job? = null
+    private var recoveryPrompted: Query? = null
     internal var page by mutableStateOf<ResultPage?>(null)
+    internal var publicPage by mutableStateOf<ResultPage?>(null)
+    internal val visiblePage: ResultPage? get() = if (tab == 1) publicPage else page
     internal var challenge by mutableStateOf<Challenge?>(null)
     internal var loading by mutableStateOf(false)
     internal var automaticRefresh by mutableStateOf(false)
@@ -62,6 +81,7 @@ class MainActivity : FragmentActivity() {
         private set
     internal var interval by mutableLongStateOf(15)
     internal var remembered by mutableStateOf("")
+    internal var replaceCredentials by mutableStateOf(false)
     internal var storedPassword by mutableStateOf("")
     internal var saved by mutableStateOf(emptyList<Saved>())
     internal var history by mutableStateOf(emptyList<Entry>())
@@ -74,17 +94,34 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (Build.VERSION.SDK_INT >= 33) setRecentsScreenshotEnabled(false)
+        backgroundEnabled = services.settings.getBoolean("metro_background", false)
+        startAfterReboot = services.settings.getBoolean("metro_boot", false)
+        privateNotifications = services.settings.getBoolean("notification_privacy", false)
+        reducedMotion = services.settings.getBoolean("metro_reduced_motion", false)
+        motionSpeed = services.settings.getFloat("metro_motion_speed", 1f)
+        trackingEnabled = services.settings.getBoolean("metro_tracking", true)
+        signedOut = services.settings.getBoolean("signed_out", false)
         themeMode = ThemeMode.entries.firstOrNull { it.name == services.settings.getString("theme_mode", null) }
         interval = services.settings.getLong("interval", 15)
         biometricEnabled = services.settings.getBoolean("biometric", false)
         locked = biometricEnabled
         pendingKey = intent.getStringExtra("enquiry") ?: services.liveTracking.value?.query?.storageKey
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) { migrateLegacy() }
+            val account = withContext(Dispatchers.IO) {
+                migrateLegacy()
+                val user = services.vault.get("username")
+                user to (services.vault.get("password") != null)
+            }
+            savedAccount = account.first?.let { "••••" + it.takeLast(3) }
+            hasSavedPassword = account.second
             services.store.changes.collect {
-                val (list, entries) = withContext(Dispatchers.IO) { services.store.saved() to services.store.history() }
+                val (list, entries, recent) = withContext(Dispatchers.IO) {
+                    Triple(services.store.saved(), services.store.history(), services.store.recent())
+                }
                 saved = list
                 history = entries
+                recents = recent
                 val current = page
                 val latest = current?.let { result -> entries.firstOrNull { it.key == result.query.storageKey } }
                 if (current != null && latest != null &&
@@ -95,18 +132,119 @@ class MainActivity : FragmentActivity() {
             }
         }
         lifecycleScope.launch(Dispatchers.IO) {
+            Tracking.noteAppOpened(this@MainActivity, services)
             Tracking.sync(this@MainActivity, services)
             Alert.entries.forEach { Tracking.channel(this@MainActivity, it) }
         }
         setContent {
-            BackHandler(page != null || challenge != null) {
-                if (!loading || automaticRefresh) {
-                    if (challenge != null) closeChallenge() else page = null
-                }
-            }
+            BackHandler(challenge != null || searching || detailsOpen || settingsSection != null) { goBack() }
             TrackerApp(this)
         }
         if (locked) window.decorView.post { authenticate(false) }
+    }
+
+    internal fun goBack() {
+        when {
+            challenge != null && !loading -> closeChallenge()
+            challenge != null -> Unit
+            searching -> searching = false
+            detailsOpen -> detailsOpen = false
+            settingsSection != null -> settingsSection = null
+        }
+    }
+
+    internal fun openSearch(draft: Query? = null) {
+        searchDraft = draft
+        queryText = draft?.key.orEmpty()
+        consignor = draft?.consignor ?: "FCI"
+        searching = true
+        message = null
+    }
+
+    internal fun enquire(query: Query, guest: Boolean = false) {
+        if (loading) return
+        detailsOpen = false
+        settingsSection = null
+        detailsTab = 0
+        if (guest) {
+            tab = 1
+            beginChallenge(true, query)
+        } else {
+            searching = false
+            tab = 0
+            open(query)
+        }
+    }
+
+    internal fun removeRecent(entry: Entry) {
+        lifecycleScope.launch(Dispatchers.IO) { services.store.removeRecent(entry.key) }
+    }
+
+    internal fun setSyncSeconds(value: Long) {
+        val seconds = value.coerceIn(0, 900)
+        services.intervalSeconds.value = seconds
+        services.settings.edit().putLong("metro_interval_seconds", seconds).apply()
+    }
+
+    internal fun setTracking(active: Boolean) {
+        trackingEnabled = active
+        services.settings.edit().putBoolean("metro_tracking", active).apply()
+        if (!active) {
+            foregroundRefresh?.cancel()
+            stopBackgroundLive()
+        } else if (backgroundEnabled && services.signedIn.value) {
+            page?.let { startBackgroundLive(it.query, it.freight) }
+        }
+        lifecycleScope.launch(Dispatchers.IO) { Tracking.sync(this@MainActivity, services) }
+    }
+
+    internal fun setBackground(active: Boolean) {
+        backgroundEnabled = active
+        services.settings.edit().putBoolean("metro_background", active).apply()
+        if (!active) stopBackgroundLive()
+        else if (trackingEnabled && services.signedIn.value) page?.let { startBackgroundLive(it.query, it.freight) }
+    }
+
+    internal fun setBootTracking(active: Boolean) {
+        startAfterReboot = active
+        services.settings.edit().putBoolean("metro_boot", active).apply()
+    }
+
+    internal fun setNotificationPrivacy(active: Boolean) {
+        privateNotifications = active
+        services.settings.edit().putBoolean("notification_privacy", active).apply()
+        getSystemService(NotificationManager::class.java).cancelAll()
+        if (services.liveTracking.value != null) {
+            startService(Intent(this, LiveTrackingService::class.java).setAction(LiveTrackingService.UPDATE_NOTIFICATION))
+        }
+    }
+
+    internal fun changeMotion(reduced: Boolean = reducedMotion, speed: Float = motionSpeed) {
+        reducedMotion = reduced
+        motionSpeed = speed
+        services.settings.edit().putBoolean("metro_reduced_motion", reduced).putFloat("metro_motion_speed", speed).apply()
+    }
+
+    internal fun loginWithSaved() {
+        if (loading) return
+        beginChallenge(false, page?.takeUnless { it.freight.firstOrNull()?.source == "Public FNR" }?.query)
+    }
+
+    internal fun changeCredentials() {
+        if (loading) return
+        beginChallenge(false)
+        replaceCredentials = true
+    }
+
+    internal fun deleteCredentials() {
+        if (loading) return
+        logout(deleteCredentials = true)
+    }
+
+    internal fun maybePromptRecovery(query: Query?) {
+        if (query == null || !foreground || locked || loading || challenge != null || recoveryPrompted == query) return
+        recoveryPrompted = query
+        beginChallenge(false, query)
     }
 
     private fun migrateLegacy() {
@@ -158,13 +296,23 @@ class MainActivity : FragmentActivity() {
         val stored = Query.fromStorage(key)
         val query = Query.parse(stored.key, stored.consignor) ?: return
         val cached = history.find { it.key == key }?.freight.orEmpty()
-        if (cached.isNotEmpty()) page = ResultPage(query, cached, true)
-        else open(query)
+        if (cached.isNotEmpty()) {
+            val storedPage = ResultPage(query, cached, true)
+            if (cached.first().source == "Public FNR") {
+                tab = 1
+                publicPage = storedPage
+            } else {
+                tab = 0
+                page = storedPage
+            }
+        } else open(query)
     }
 
     internal fun authenticate(enabling: Boolean) {
         if (prompting) return
-        val options = BiometricManager.Authenticators.BIOMETRIC_STRONG
+        val canUseCredential = Build.VERSION.SDK_INT >= 30
+        val options = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            if (canUseCredential) BiometricManager.Authenticators.DEVICE_CREDENTIAL else 0
         if (BiometricManager.from(this).canAuthenticate(options) != BiometricManager.BIOMETRIC_SUCCESS) {
             message = "Set up a supported fingerprint or strong biometric in Android settings."
             return
@@ -185,8 +333,10 @@ class MainActivity : FragmentActivity() {
                 message = errString.toString()
             }
         })
-        prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("FOIS Tracker")
-            .setSubtitle("Unlock freight tracking").setAllowedAuthenticators(options).setNegativeButtonText("Cancel").build())
+        val info = BiometricPrompt.PromptInfo.Builder().setTitle("FOIS Tracker")
+            .setSubtitle("Unlock freight tracking").setAllowedAuthenticators(options)
+        if (!canUseCredential) info.setNegativeButtonText("Cancel")
+        prompt.authenticate(info.build())
     }
 
     internal fun disableBiometric() {
@@ -214,6 +364,7 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         foreground = true
+        trackingEnabled = services.settings.getBoolean("metro_tracking", true)
         updateNotificationState()
         requestInitialNotificationPermission()
     }
@@ -246,14 +397,29 @@ class MainActivity : FragmentActivity() {
         val query = Query.parse(queryText, consignor)
         if (query == null) {
             message = "Enter an 11-digit FNR or two different station codes, such as RMN CFS."
-        } else open(query)
+        } else enquire(query)
+    }
+
+    internal fun openSaved(query: Query) {
+        tab = 0
+        settingsSection = null
+        searching = false
+        detailsOpen = false
+        open(query)
     }
 
     internal fun open(query: Query, cachedOnly: Boolean = false) {
         if (loading) return
         refreshIssue = null
+        lifecycleScope.launch(Dispatchers.IO) { services.store.restoreRecent(query.storageKey) }
         val cached = history.find { it.key == query.storageKey }?.freight.orEmpty()
-        if (cached.isNotEmpty()) page = ResultPage(query, cached, true)
+        if (cached.isNotEmpty()) {
+            val saved = ResultPage(query, cached, true)
+            if (cached.first().source == "Public FNR") {
+                publicPage = saved
+                if (cachedOnly || !services.signedIn.value) tab = 1
+            } else page = saved
+        }
         if (cached.isNotEmpty() && (cachedOnly || !canReachInternet())) return
         message = null
         if (services.signedIn.value) refresh(query)
@@ -268,10 +434,15 @@ class MainActivity : FragmentActivity() {
             refreshIssue = null
         }
         if (!canReachInternet()) {
-            page = page?.copy(cached = true)
+            if (!automatic && tab == 1) publicPage = publicPage?.copy(cached = true)
+            else page = page?.copy(cached = true)
             if (automatic) refreshIssue = query to "Live refresh paused · offline"
             else message = if (page == null) "No internet connection. Connect and retry the search."
                 else "Offline. Showing the last retrieved freight result."
+            return
+        }
+        if (!automatic && notifyOnRefresh && tab == 1 && publicPage?.query == query) {
+            beginChallenge(true, query, notifyOnRefresh)
             return
         }
         if (!services.signedIn.value) {
@@ -284,10 +455,11 @@ class MainActivity : FragmentActivity() {
                 val result = services.networkLock.withLock {
                     try {
                         val fresh = services.client.enquiry(query)
+                        currentCoroutineContext().ensureActive()
                         services.persistSession()
                         recordRefresh(query, fresh, notifyOnRefresh)
                     } catch (e: FoisError.Authentication) {
-                        services.forgetSession()
+                        services.markExpired(query)
                         throw e
                     }
                 }
@@ -317,6 +489,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun initializeChallenge(guest: Boolean, query: Query?, notifyOnRefresh: Boolean) {
+        replaceCredentials = false
         challenge = Challenge(guest, query, notifyOnRefresh = notifyOnRefresh)
         remembered = ""
         storedPassword = ""
@@ -334,11 +507,11 @@ class MainActivity : FragmentActivity() {
         execute { loadChallenge(reset = current.image == null) }
     }
 
-    private suspend fun loadChallenge(reset: Boolean) {
+    private suspend fun loadChallenge(reset: Boolean, useSavedPassword: Boolean = true) {
         val current = withContext(Dispatchers.Main) { challenge } ?: return
         val (bitmap, user, password) = services.networkLock.withLock {
             val user = if (current.guest) "" else services.vault.get("username").orEmpty()
-            val password = if (current.guest) "" else services.vault.get("password").orEmpty()
+            val password = if (current.guest || !useSavedPassword) "" else services.vault.get("password").orEmpty()
             val bytes = services.client.image(current.guest, reset)
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -353,7 +526,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    internal fun submit(user: String, password: String, answer: String, remember: Boolean, keep: Boolean) {
+    internal fun submit(user: String, password: String, answer: String) {
         val current = challenge ?: return
         if (answer.isBlank() || (!current.guest && (user.isBlank() || password.isBlank()))) {
             message = "Complete the required fields and enter the verification code."
@@ -368,8 +541,10 @@ class MainActivity : FragmentActivity() {
                     } else {
                         services.client.signIn(user.trim(), password, answer.trim())
                         services.persistSession()
-                        services.vault.put("username", user.trim().takeIf { remember || keep })
-                        services.vault.put("password", password.takeIf { keep })
+                        services.vault.put("username", user.trim())
+                        services.vault.put("password", password)
+                        services.settings.edit().putBoolean("signed_out", false).apply()
+                        services.clearRecovery()
                         services.store.clearAlerts(Alert.AUTH.name)
                         services.store.clearAlerts(Alert.SESSION.name)
                         services.store.saved().filter { it.tracking }.forEach {
@@ -381,7 +556,15 @@ class MainActivity : FragmentActivity() {
                 }
                 withContext(Dispatchers.Main) {
                     closeChallenge()
-                    if (!current.guest) message = if (current.query == null) "Signed in to ECBS." else null
+                    if (!current.guest) {
+                        savedAccount = "••••" + user.trim().takeLast(3)
+                        hasSavedPassword = true
+                        signedOut = false
+                        recoveryPrompted = null
+                        refreshIssue = null
+                        message = if (current.query == null) "ECBS connected." else null
+                        lifecycleScope.launch(Dispatchers.IO) { Tracking.sync(this@MainActivity, services) }
+                    }
                 }
                 val query = current.query
                 if (query != null) {
@@ -393,7 +576,7 @@ class MainActivity : FragmentActivity() {
                                 services.persistSession()
                                 recordRefresh(query, rows, current.notifyOnRefresh)
                             } catch (e: FoisError.Authentication) {
-                                services.forgetSession()
+                                services.markExpired(query)
                                 throw e
                             }
                         }
@@ -409,9 +592,10 @@ class MainActivity : FragmentActivity() {
             } catch (e: FoisError.Credentials) {
                 withContext(Dispatchers.Main) {
                     message = e.message
+                    storedPassword = ""
                     challenge = current.copy(image = null, revision = current.revision + 1)
                 }
-                loadChallenge(reset = true)
+                loadChallenge(reset = true, useSavedPassword = false)
             }
         }
     }
@@ -430,20 +614,35 @@ class MainActivity : FragmentActivity() {
     }
 
     private suspend fun show(query: Query, result: List<Freight>) = withContext(Dispatchers.Main) {
-        val oldPage = page?.takeIf { it.query == query }
+        val public = result.firstOrNull()?.source == "Public FNR"
+        val oldPage = (if (public) publicPage else page)?.takeIf { it.query == query }
         val oldItem = oldPage?.freight?.getOrNull(oldPage.selected)
         val index = oldItem?.let { old -> result.indexOfFirst { row ->
             if (old.fnr.isNotEmpty()) row.fnr == old.fnr
             else old.values["Rake identification"] != null && old.values["Rake identification"] == row.values["Rake identification"]
         } } ?: 0
-        page = ResultPage(query, result, false, index.coerceAtLeast(0))
+        val updated = ResultPage(query, result, false, index.coerceAtLeast(0))
+        if (public) {
+            publicPage = updated
+            if (tab == 0 && page == null) tab = 1
+        } else page = updated
+        if (!public && oldPage == null && backgroundEnabled && trackingEnabled && result.firstOrNull()?.source != "Public FNR" &&
+            services.liveTracking.value?.query != query && result.any { it.arrived == null }) startBackgroundLive(query, result)
+    }
+
+    internal fun openDetails(result: ResultPage, index: Int) {
+        val current = visiblePage?.takeIf { it.query == result.query } ?: return
+        if (index !in current.freight.indices) return
+        if (tab == 1) publicPage = current.copy(selected = index) else page = current.copy(selected = index)
+        detailsOpen = true
     }
 
     internal fun startBackgroundLive(query: Query, freight: List<Freight>) {
-        if (!foreground || !services.signedIn.value) return
+        if (!foreground || !services.signedIn.value || signedOut ||
+            freight.none { it.source != "Public FNR" && it.arrived == null }) return
         if (!notificationsAllowed) {
             enableNotifications()
-            message = "Allow notifications, then tap Keep live in background again."
+            message = "Allow notifications, then turn on BG again."
             return
         }
         try {
@@ -461,18 +660,31 @@ class MainActivity : FragmentActivity() {
         stopService(Intent(this, LiveTrackingService::class.java))
     }
 
-    internal fun logout() {
-        stopBackgroundLive()
-        execute {
+    internal fun logout(deleteCredentials: Boolean = false) {
+        if (loading && !automaticRefresh) return
+        setTracking(false)
+        signedOut = true
+        services.settings.edit().putBoolean("signed_out", true).apply()
+        services.clearRecovery()
+        lifecycleScope.launch(Dispatchers.IO) {
             services.networkLock.withLock {
                 try { services.client.signOut() }
                 catch (_: IOException) { }
                 finally {
                     services.forgetSession()
-                    services.vault.put("password", null)
+                    if (deleteCredentials) {
+                        services.vault.put("password", null)
+                        services.vault.put("username", null)
+                    }
                 }
             }
-            withContext(Dispatchers.Main) { message = "Signed out. Background checks need a new ECBS session." }
+            withContext(Dispatchers.Main) {
+                if (deleteCredentials) {
+                    savedAccount = null
+                    hasSavedPassword = false
+                }
+                message = "Signed out."
+            }
         }
     }
 
@@ -526,12 +738,17 @@ class MainActivity : FragmentActivity() {
         if (loading) return
         automaticRefresh = quietQuery != null
         loading = true
-        lifecycleScope.launch {
+        val request = lifecycleScope.launch {
             try { withContext(Dispatchers.IO) { task() } }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (quietQuery != null) {
-                    if (page?.query == quietQuery) refreshIssue = quietQuery to "Live refresh paused · tap Refresh to retry"
+                    if (page?.query == quietQuery) {
+                        val issue = quietQuery to "Live refresh paused · retrying"
+                        refreshIssue = issue
+                        delay((e as? FoisError.Throttled)?.retryMillis ?: 15_000)
+                        if (refreshIssue == issue) refreshIssue = null
+                    }
                 } else message = when (e) {
                     is FoisError -> e.message
                     is SocketTimeoutException -> "FOIS timed out. Try again."
@@ -545,5 +762,6 @@ class MainActivity : FragmentActivity() {
                 automaticRefresh = false
             }
         }
+        if (quietQuery != null) foregroundRefresh = request
     }
 }
