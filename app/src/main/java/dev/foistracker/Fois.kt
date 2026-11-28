@@ -283,16 +283,22 @@ class FoisCookies(initial: List<Cookie> = emptyList()) : CookieJar {
         cookies.filter { it.expiresAt > System.currentTimeMillis() && it.matches(url) }
     @Synchronized fun all() = cookies.filter { it.expiresAt > System.currentTimeMillis() }
     @Synchronized fun clear() = cookies.clear()
+    @Synchronized fun replace(snapshot: List<Cookie>) {
+        cookies.clear()
+        cookies.addAll(snapshot)
+    }
 }
 
 class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
     private val root: HttpUrl = "https://www.fois.indianrail.gov.in/".toHttpUrl()) {
     private val publicCookies = FoisCookies()
-    private fun client(jar: FoisCookies) = OkHttpClient.Builder().cookieJar(jar)
-        .followRedirects(false).followSslRedirects(false)
+    private val transport = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .connectTimeout(12, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS).build()
+    private fun client(jar: FoisCookies) = transport.newBuilder().cookieJar(jar).build()
+    private val loginCookies = FoisCookies()
     private val auth = client(authCookies)
+    private val login = client(loginCookies)
     private val guest = client(publicCookies)
     private val directory = client(FoisCookies())
     private val stationPage = "FOISWebPortal/pages/FWP_SttnHelp.jsp"
@@ -302,11 +308,20 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
     private val home = "ecbs/JSP/HomeLinks.jsp"
     @Volatile private var retryUntil = 0L
     private var loginTimestamp: String? = null
+    private data class Enrichment(val stationPair: Pair<String, String>, val freight: Freight?, val storedAt: Long)
+    private val fnrEnrichment = object : LinkedHashMap<String, Enrichment>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Enrichment>?) = size > 64
+    }
+
+    fun clearAuthenticatedSession() {
+        authCookies.clear()
+        fnrEnrichment.clear()
+    }
     private fun today() = LocalDate.now(ist).format(DateTimeFormatter.ofPattern("dd-MM-uuuu"))
 
     private fun request(path: String, query: Map<String, String> = emptyMap(), form: Map<String, String>? = null,
         referer: String? = null, ajax: Boolean = false, public: Boolean = false,
-        stationDirectory: Boolean = false): ByteArray {
+        stationDirectory: Boolean = false, authVerification: Boolean = false): ByteArray {
         val remaining = retryUntil - System.currentTimeMillis()
         if (remaining > 0) throw FoisError.Throttled(remaining)
         var url = requireNotNull(root.resolve(path)).newBuilder().apply {
@@ -322,7 +337,12 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
                 builder.header("Origin", requireNotNull(root.resolve("/")).toString().trimEnd('/'))
                 builder.post(FormBody.Builder().apply { data.forEach { (key, value) -> add(key, value) } }.build())
             }
-            val http = if (stationDirectory) directory else if (public) guest else auth
+            val http = when {
+                stationDirectory -> directory
+                public -> guest
+                authVerification -> login
+                else -> auth
+            }
             http.newCall(builder.build()).execute().use { response ->
                 if (response.code in listOf(301, 302, 303, 307, 308)) {
                     val destination = response.header("Location")?.let(url::resolve) ?: throw FoisError.Format()
@@ -360,36 +380,45 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
 
     fun image(public: Boolean, reset: Boolean): ByteArray {
         if (reset) {
-            (if (public) publicCookies else authCookies).clear()
-            val page = request(if (public) publicPage else loginPage, public = public)
+            if (public) publicCookies.clear() else loginCookies.clear()
+            val page = request(if (public) publicPage else loginPage, public = public, authVerification = !public)
             if (!public) loginTimestamp = Jsoup.parse(page.decodeToString())
                 .selectFirst("input[name=logintimeform]")?.attr("value")?.takeIf { it.matches(Regex("[0-9]{10,16}")) }
         }
         return request(if (public) "FOISWebPortal/portalCaptcha.jpg" else "ecbs/ecustCaptcha.jpg",
             query = mapOf("_" to System.currentTimeMillis().toString()),
-            referer = if (public) publicPage else loginPage, public = public)
+            referer = if (public) publicPage else loginPage, public = public, authVerification = !public)
     }
 
     fun signIn(username: String, password: String, answer: String) {
         if (request("ecbs/matchcaptcha", form = mapOf("result" to answer), referer = loginPage,
-                ajax = true).decodeToString().trim() != "Y") throw FoisError.Verification()
-        val key = request("ecbs/PassSecure", form = emptyMap(), referer = loginPage, ajax = true).decodeToString().trim()
+                ajax = true, authVerification = true).decodeToString().trim() != "Y") throw FoisError.Verification()
+        val key = request("ecbs/PassSecure", form = emptyMap(), referer = loginPage,
+            ajax = true, authVerification = true).decodeToString().trim()
         if (key.isEmpty() || key.contains('<') || key.contains("server issue", true)) throw FoisError.Format()
         request(router, form = mapOf("operation" to "login", "logintimeform" to (loginTimestamp ?: System.currentTimeMillis().toString()),
             "txtInputPage" to "", "txtUserID" to username.uppercase(Locale.ROOT),
             "passwd" to cryptoJsPassword(password, key), "txtLangFlag" to "E", "txtSHYFlag" to "",
             "txtUserId" to username.lowercase(Locale.ROOT), "txtPassword" to (cryptoJsPassword(password, key) + "#" + key),
-            "answer" to answer), referer = loginPage)
-        if (!validate()) throw FoisError.Credentials()
+            "answer" to answer), referer = loginPage, authVerification = true)
+        if (!validate(authVerification = true)) throw FoisError.Credentials()
+        authCookies.replace(loginCookies.all())
+        loginCookies.clear()
+        fnrEnrichment.clear()
     }
 
     private enum class SessionCheck { VALID, EXPIRED, UNKNOWN }
 
-    private fun checkSession(): SessionCheck = try {
-        val html = request(home, query = mapOf("action" to "Query")).decodeToString()
+    private fun checkSession(authVerification: Boolean = false): SessionCheck = try {
+        val html = request(home, query = mapOf("action" to "Query"), authVerification = authVerification).decodeToString()
         when {
             FreightParser.expired(html) -> SessionCheck.EXPIRED
-            listOf("logout", "QryInsight", "HomeLinks").any { html.contains(it, true) } -> SessionCheck.VALID
+            Jsoup.parse(html).select("a[href], frame[src], iframe[src]").any { element ->
+                val target = element.attr(if (element.tagName() == "a") "href" else "src")
+                target.contains("logout", true) || target.contains("QryInsight", true) ||
+                    element.text().trim().equals("log out", true) ||
+                    element.text().trim().equals("logout", true)
+            } -> SessionCheck.VALID
             else -> SessionCheck.UNKNOWN
         }
     } catch (_: FoisError.Authentication) {
@@ -398,7 +427,7 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
         SessionCheck.UNKNOWN
     }
 
-    fun validate(): Boolean = when (checkSession()) {
+    fun validate(authVerification: Boolean = false): Boolean = when (checkSession(authVerification)) {
         SessionCheck.VALID -> true
         SessionCheck.EXPIRED -> false
         SessionCheck.UNKNOWN -> throw FoisError.Unavailable()
@@ -410,7 +439,10 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
             val link = doc.select("a[href]").firstOrNull { it.text().contains("logout", true) || it.text().contains("log out", true) }
             val target = link?.attr("href")?.let { root.resolve("/$home")?.resolve(it) }
             if (target != null && target.encodedPath.startsWith("/ecbs/")) request(target.toString())
-        } finally { authCookies.clear() }
+        } finally {
+            clearAuthenticatedSession()
+            loginCookies.clear()
+        }
     }
 
     fun findStations(text: String, byCode: Boolean): List<Pair<String, String>> {
@@ -460,14 +492,20 @@ class FoisClient(private val authCookies: FoisCookies = FoisCookies(),
         }
         val origin = code("Origin") ?: return base
         val destination = code("Destination") ?: return base
-        return try {
-            val matching = route(origin, destination, "FCI").firstOrNull { it.fnr == number } ?: return base
-            base.copy(values = matching.values + base.values, journey = (base.journey + matching.journey).distinct())
-        } catch (e: FoisError.Authentication) {
-            throw e
-        } catch (_: IOException) {
-            base
+        val stationPair = origin to destination
+        val now = System.nanoTime()
+        val cached = fnrEnrichment[number]?.takeIf {
+            it.stationPair == stationPair && now - it.storedAt < TimeUnit.MINUTES.toNanos(1)
         }
+        val extra = if (cached != null) cached.freight else {
+            val matching = try { route(origin, destination, "FCI").firstOrNull { it.fnr == number } }
+                catch (e: FoisError.Authentication) { throw e }
+                catch (_: IOException) { return base }
+            fnrEnrichment[number] = Enrichment(stationPair, matching, System.nanoTime())
+            matching
+        }
+        return base.copy(values = extra?.values.orEmpty() + base.values,
+            journey = (base.journey + extra?.journey.orEmpty()).distinct())
     }
 
     private fun route(origin: String, destination: String, consignor: String): List<Freight> {

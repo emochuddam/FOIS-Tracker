@@ -218,7 +218,8 @@ class Services private constructor(context: Context) {
         (0 until json.length()).mapNotNull { Cookie.parse(root, json.getString(it)) }
     }.getOrDefault(emptyList()))
     val liveTracking = MutableStateFlow<LiveTrackingState?>(null)
-    val signedIn = MutableStateFlow(cookies.all().isNotEmpty())
+    val signedIn = MutableStateFlow(false)
+    val sessionPending = MutableStateFlow(!settings.getBoolean("signed_out", false) && cookies.all().isNotEmpty())
     val client = FoisClient(cookies)
     val networkLock = Mutex()
     val intervalSeconds = MutableStateFlow(settings.getLong("metro_interval_seconds", 1).coerceIn(0, 900))
@@ -229,9 +230,21 @@ class Services private constructor(context: Context) {
         recovery.value = null
     }
 
-    fun markExpired(query: Query) {
+    // Call while holding networkLock, alongside enquiries and sign-in.
+    fun validateRestoredSession(query: Query? = null): Boolean {
+        if (settings.getBoolean("signed_out", false)) return false
+        if (signedIn.value || !sessionPending.value) return signedIn.value
+        if (client.validate()) {
+            persistSession()
+        } else {
+            markExpired(query)
+        }
+        return signedIn.value
+    }
+
+    fun markExpired(query: Query?) {
         forgetSession()
-        if (!settings.getBoolean("signed_out", false) && vault.get("username") != null && vault.get("password") != null) {
+        if (query != null && !settings.getBoolean("signed_out", false) && vault.get("username") != null && vault.get("password") != null) {
             settings.edit().putString("metro_recovery_query", query.storageKey).apply()
             recovery.value = query
         }
@@ -240,8 +253,14 @@ class Services private constructor(context: Context) {
         val list = cookies.all()
         vault.put("session", list.takeIf { it.isNotEmpty() }?.let { JSONArray(it.map(Cookie::toString)).toString() })
         signedIn.value = list.isNotEmpty()
+        sessionPending.value = false
     }
-    fun forgetSession() { cookies.clear(); vault.put("session", null); signedIn.value = false }
+    fun forgetSession() {
+        client.clearAuthenticatedSession()
+        vault.put("session", null)
+        signedIn.value = false
+        sessionPending.value = false
+    }
     companion object {
         @Volatile private var instance: Services? = null
         fun get(context: Context) = instance ?: synchronized(this) {

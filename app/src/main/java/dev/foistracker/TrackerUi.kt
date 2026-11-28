@@ -128,10 +128,32 @@ fun TrackerApp(app: MainActivity) {
         bars.isAppearanceLightNavigationBars = !darkMode
     }
     val signedIn by app.services.signedIn.collectAsState()
+    val pending by app.services.sessionPending.collectAsState()
+    LaunchedEffect(pending, app.foreground, app.locked, app.challenge) {
+        if (pending && app.foreground && !app.locked && app.challenge == null) {
+            while (app.services.sessionPending.value) {
+                app.checkSavedSession()
+                if (app.services.sessionPending.value) delay(30_000)
+            }
+        }
+    }
+    val refreshIssue = app.refreshIssue
+    LaunchedEffect(refreshIssue, app.foreground, app.trackingEnabled) {
+        if (refreshIssue?.second == "Live refresh paused · offline" && app.foreground && app.trackingEnabled) {
+            while (app.refreshIssue == refreshIssue) {
+                delay(3_000)
+                app.retryOfflineRefresh(refreshIssue.first)
+            }
+        }
+    }
     val recovery by app.services.recovery.collectAsState()
     LaunchedEffect(recovery, app.foreground, app.loading, app.locked) { app.maybePromptRecovery(recovery) }
     val page = app.page
     val live by app.services.liveTracking.collectAsState()
+    LaunchedEffect(live) {
+        val paused = live?.takeIf { it.paused }
+        if (paused != null && app.page?.query == paused.query) app.page = app.page?.copy(cached = true)
+    }
     val seconds by app.services.intervalSeconds.collectAsState()
     val candidate = page?.takeIf { it.freight.any { item -> item.source != "Public FNR" && item.arrived == null } }
     val polling = candidate != null && app.trackingEnabled && signedIn && app.foreground && !app.locked &&
@@ -346,6 +368,7 @@ private fun Feed(content: LazyListScope.() -> Unit) {
 
 @Composable
 private fun Home(app: MainActivity, signedIn: Boolean) {
+    val pending by app.services.sessionPending.collectAsState()
     val recovery by app.services.recovery.collectAsState()
     Feed {
         item {
@@ -354,6 +377,7 @@ private fun Home(app: MainActivity, signedIn: Boolean) {
                     recovery != null && app.loading -> "Reconnecting automatically…"
                     recovery != null -> "Session expired · FOIS verification required"
                     signedIn -> "ECBS connected"
+                    pending -> "Checking saved ECBS session…"
                     app.signedOut && app.savedAccount != null -> "Welcome back"
                     else -> "ECBS disconnected"
                 }, style = MaterialTheme.typography.titleMedium)

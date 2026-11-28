@@ -136,13 +136,13 @@ class FreightWorker(context: Context, params: WorkerParameters) : CoroutineWorke
             services.networkLock.withLock {
                 if (services.liveTracking.value?.query?.storageKey == item.key) return@withLock
                 if (!services.store.saved().any { it.key == item.key && it.tracking }) return@withLock
-                if (!services.signedIn.value) {
-                    Tracking.notify(applicationContext, services, item.key, Alert.AUTH, "Sign in to continue background tracking.")
-                    return Result.success()
-                }
                 try {
-                    val old = services.store.cached(item.key)
                     val query = Query.fromStorage(item.key)
+                    if (!services.validateRestoredSession(query)) {
+                        Tracking.notify(applicationContext, services, item.key, Alert.AUTH, "Sign in to continue background tracking.")
+                        return Result.success()
+                    }
+                    val old = services.store.cached(item.key)
                     if (!query.isFnr) return@withLock
                     val next = services.store.record(item.key, services.client.enquiry(query)).first()
                     services.persistSession()

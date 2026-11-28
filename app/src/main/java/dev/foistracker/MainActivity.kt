@@ -107,6 +107,7 @@ class MainActivity : FragmentActivity() {
         biometricEnabled = services.settings.getBoolean("biometric", false)
         locked = biometricEnabled
         pendingKey = intent.getStringExtra("enquiry") ?: services.liveTracking.value?.query?.storageKey
+            ?: services.settings.getString("metro_last_query", null)?.takeUnless { signedOut }
         lifecycleScope.launch {
             val account = withContext(Dispatchers.IO) {
                 migrateLegacy()
@@ -151,6 +152,22 @@ class MainActivity : FragmentActivity() {
             detailsOpen -> detailsOpen = false
             settingsSection != null -> settingsSection = null
         }
+    }
+
+    internal suspend fun checkSavedSession() {
+        if (!canReachInternet() || loading || challenge != null) return
+        val query = page?.query ?: pendingKey?.let(Query::fromStorage)
+        try {
+            withContext(Dispatchers.IO) {
+                services.networkLock.withLock { services.validateRestoredSession(query) }
+            }
+        } catch (_: IOException) {
+            // Keep the encrypted cookies available for a later validation.
+        }
+    }
+
+    internal fun retryOfflineRefresh(query: Query) {
+        if (canReachInternet() && refreshIssue?.first == query) refreshIssue = null
     }
 
     internal fun openSearch(draft: Query? = null) {
@@ -417,13 +434,13 @@ class MainActivity : FragmentActivity() {
             val saved = ResultPage(query, cached, true)
             if (cached.first().source == "Public FNR") {
                 publicPage = saved
-                if (cachedOnly || !services.signedIn.value) tab = 1
+                if (cachedOnly || !services.signedIn.value && !services.sessionPending.value) tab = 1
             } else page = saved
         }
         if (cached.isNotEmpty() && (cachedOnly || !canReachInternet())) return
         message = null
-        if (services.signedIn.value) refresh(query)
-        else beginChallenge(query.isFnr, query)
+        if (services.signedIn.value || services.sessionPending.value) refresh(query)
+        else beginChallenge(query.isFnr && (!hasSavedPassword || signedOut), query)
     }
 
     internal fun refresh(query: Query, automatic: Boolean = false, notifyOnRefresh: Boolean = false) {
@@ -445,15 +462,16 @@ class MainActivity : FragmentActivity() {
             beginChallenge(true, query, notifyOnRefresh)
             return
         }
-        if (!services.signedIn.value) {
+        if (!services.signedIn.value && !services.sessionPending.value) {
             if (automatic) refreshIssue = query to "Live refresh paused · sign-in required"
-            else beginChallenge(query.isFnr, query, notifyOnRefresh)
+            else beginChallenge(query.isFnr && (!hasSavedPassword || signedOut), query, notifyOnRefresh)
             return
         }
         execute(quietQuery = query.takeIf { automatic }) {
             try {
                 val result = services.networkLock.withLock {
                     try {
+                        if (!services.validateRestoredSession(query)) throw FoisError.Authentication()
                         val fresh = services.client.enquiry(query)
                         currentCoroutineContext().ensureActive()
                         services.persistSession()
@@ -469,7 +487,10 @@ class MainActivity : FragmentActivity() {
             } catch (_: FoisError.Authentication) {
                 if (automatic) {
                     withContext(Dispatchers.Main) {
-                        if (page?.query == query) refreshIssue = query to "Live refresh paused · sign-in required"
+                        if (page?.query == query) {
+                            page = page?.copy(cached = true)
+                            refreshIssue = query to "Live refresh paused · sign-in required"
+                        }
                     }
                     return@execute
                 }
@@ -625,8 +646,11 @@ class MainActivity : FragmentActivity() {
         if (public) {
             publicPage = updated
             if (tab == 0 && page == null) tab = 1
-        } else page = updated
-        if (!public && oldPage == null && backgroundEnabled && trackingEnabled && result.firstOrNull()?.source != "Public FNR" &&
+        } else {
+            page = updated
+            services.settings.edit().putString("metro_last_query", query.storageKey).apply()
+        }
+        if (!public && backgroundEnabled && trackingEnabled && result.firstOrNull()?.source != "Public FNR" &&
             services.liveTracking.value?.query != query && result.any { it.arrived == null }) startBackgroundLive(query, result)
     }
 
@@ -744,6 +768,7 @@ class MainActivity : FragmentActivity() {
             catch (e: Exception) {
                 if (quietQuery != null) {
                     if (page?.query == quietQuery) {
+                        page = page?.copy(cached = true)
                         val issue = quietQuery to "Live refresh paused · retrying"
                         refreshIssue = issue
                         delay((e as? FoisError.Throttled)?.retryMillis ?: 15_000)

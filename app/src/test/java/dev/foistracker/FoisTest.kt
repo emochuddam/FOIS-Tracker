@@ -7,6 +7,41 @@ import org.junit.Test
 import java.time.Instant
 
 class FoisTest {
+    @Test fun challengeDoesNotReplaceAnExistingSessionBeforeVerification() = MockWebServer().use { server ->
+        val root = server.url("/")
+        val active = FoisCookies(listOf(requireNotNull(okhttp3.Cookie.parse(root, "JSESSIONID=active; Path=/"))))
+        val client = FoisClient(active, root)
+        server.enqueue(MockResponse().addHeader("Set-Cookie", "JSESSIONID=challenge; Path=/").setBody("<html/>"))
+        server.enqueue(MockResponse().setBody("image"))
+        server.enqueue(MockResponse().setBody("N"))
+        server.enqueue(MockResponse().setBody("<a href='/ecbs/logout'>Logout</a>"))
+        client.image(public = false, reset = true)
+        assertThrows(FoisError.Verification::class.java) { client.signIn("test", "test", "test") }
+        assertTrue(client.validate())
+        assertNull(server.takeRequest().getHeader("Cookie"))
+        assertEquals("JSESSIONID=challenge", server.takeRequest().getHeader("Cookie"))
+        assertEquals("JSESSIONID=challenge", server.takeRequest().getHeader("Cookie"))
+        assertEquals("JSESSIONID=active", server.takeRequest().getHeader("Cookie"))
+    }
+
+    @Test fun repeatedFnrRefreshKeepsFreshEtaWithoutRepeatingRouteEnquiry() = MockWebServer().use { server ->
+        fun details(eta: String) = "<table><tr><td>From</td><td>RMN</td></tr>" +
+            "<tr><td>To</td><td>CFS</td></tr><tr><td>Expected arrival</td><td>$eta</td></tr></table>"
+        server.enqueue(MockResponse().setBody("<html/>"))
+        server.enqueue(MockResponse().setBody(details("24-11-2026 12:00")))
+        server.enqueue(MockResponse().setBody("<table><tr><th>FNR</th><th>STTN FROM</th><th>STTN TO</th><th>LOAD TYPE</th></tr>" +
+            "<tr><td>01234567890</td><td>RMN</td><td>CFS</td><td>BOX</td></tr></table>"))
+        server.enqueue(MockResponse().setBody("<html/>"))
+        server.enqueue(MockResponse().setBody(details("24-11-2026 13:00")))
+        val client = FoisClient(root = server.url("/"))
+        val query = Query("01234567890")
+        assertEquals("BOX", client.enquiry(query).single().get("Load type"))
+        val revised = client.enquiry(query).single()
+        assertEquals("24-11-2026 13:00", revised.eta)
+        assertEquals("BOX", revised.get("Load type"))
+        assertEquals(5, server.requestCount)
+    }
+
     @Test fun validatesFNRAndStationPairs() {
         assertEquals("01234567890", Query.parse(" 01234567890 ")?.key)
         assertNull(Query.parse("1234567890"))
